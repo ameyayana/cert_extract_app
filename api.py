@@ -48,8 +48,9 @@ async def save_record(
     model: str = Form(...),
     cal: str = Form(...),
     exp: str = Form(...),
+    cert: str = Form(...),
     collection: str = Form(...),
-    cert: str = Form(...)
+    lot: str = Form(...)  # <--- ✅ ADDED LOT HERE
 ):
     """
     Phase 2: Receives EDITED data from mobile, uploads to Firebase, 
@@ -66,24 +67,20 @@ async def save_record(
         if not pdf_url:
             raise HTTPException(status_code=500, detail="Failed to upload PDF to Firebase")
 
-        # 3. Generate QR/Web Link
-        # Note: We don't necessarily need to generate a QR image for the App 
-        # since we are writing to NFC, but we need the LINK.
-        # Assuming your web app is hosted at: https://qrcertificates-30ddb.web.app
-        # We also need a placeholder image for the DB record.
+        # 3. Generate QR Link
         qr_link = f"https://qrcertificates-30ddb.web.app/?id={utils.quote_plus(serial)}"
         
-        # (Optional) Generate a QR Image to save to DB if your web app needs it
+        # 4. Generate QR Image (Headless - No Streamlit)
         qr_local_path = utils.generate_qr_image_only(serial, qr_link)
         qr_image_url = utils.upload_to_firebase_storage(qr_local_path, serial, is_qr=True)
 
-        # 4. Save Data to Firestore
+        # 5. Save Data to Firestore
         data_packet = {
             "cert": cert,
             "model": model,
             "cal": cal,
             "exp": exp,
-            "lot": "Unknown" # You can add this field if needed
+            "lot": lot  # <--- ✅ SAVING LOT TO DB
         }
         
         success = utils.update_firestore_record(
@@ -104,7 +101,7 @@ async def save_record(
         print(f"Save Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
+        # Cleanup
         if os.path.exists(temp_path): os.remove(temp_path)
-        # Cleanup QR if generated
         qr_temp = f"qrcodes/qr_{utils.sanitize_filename(serial)}.png"
         if os.path.exists(qr_temp): os.remove(qr_temp)
