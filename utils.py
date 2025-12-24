@@ -3,10 +3,10 @@ import re
 import json
 import base64
 import qrcode
+import time
 import google.generativeai as genai
 from urllib.parse import quote_plus
 from datetime import datetime
-from PyPDF2 import PdfReader
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 
@@ -16,10 +16,11 @@ from firebase_admin import credentials, firestore, storage, initialize_app, _app
 QR_DIR = "qrcodes"
 os.makedirs(QR_DIR, exist_ok=True)
 
-# Configure Gemini
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
+else:
+    print("⚠️ WARNING: GEMINI_API_KEY is missing!")
 
 # ==========================================
 # 2. FIREBASE SETUP
@@ -30,14 +31,14 @@ def get_firebase_db():
 
     if not _apps:
         if not FIREBASE_CREDENTIALS:
-            print("Warning: FIREBASE_CREDENTIALS not found.")
+            print("❌ FIREBASE_CREDENTIALS missing.")
             return None, None
         try:
             firebase_dict = json.loads(base64.b64decode(FIREBASE_CREDENTIALS).decode("utf-8"))
             cred = credentials.Certificate(firebase_dict)
             initialize_app(cred, {'storageBucket': FIREBASE_BUCKET_NAME})
         except Exception as e:
-            print(f"Firebase Init Error: {e}")
+            print(f"❌ Firebase Init Error: {e}")
             raise e
     return firestore.client(), storage.bucket()
 
@@ -85,7 +86,7 @@ def upload_to_firebase_storage(path, serial, is_qr=False):
         blob.make_public()
         return blob.public_url
     except Exception as e:
-        print(f"Upload Error: {e}")
+        print(f"❌ Upload Error: {e}")
         return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
@@ -104,34 +105,39 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         doc_ref.set(doc_data, merge=True)
         return True
     except Exception as e:
-        print(f"Firestore Error: {e}")
+        print(f"❌ Firestore Error: {e}")
         return False
 
 # ==========================================
-# 5. AI EXTRACTION LOGIC
+# 5. AI EXTRACTION LOGIC (NATIVE PDF)
 # ==========================================
 
-def extract_with_gemini(text, manual_hint=None):
-    """
-    Sends PDF text to Google Gemini to extract JSON data.
-    """
+def extract_with_gemini(file_path, manual_hint=None):
     if not os.getenv("GEMINI_API_KEY"):
-        print("❌ No Gemini API Key found.")
+        print("❌ SKIPPING AI: No GEMINI_API_KEY found.")
         return None
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # ✅ NEW: Use Native PDF Support (Fixes Scanned Image issues)
+        print(f"📤 Uploading {file_path} to Gemini...")
+        uploaded_file = genai.upload_file(file_path, mime_type="application/pdf")
+        
+        # Wait for processing
+        time.sleep(2) 
+        
+        # Use specific stable model version to fix 404 errors
+        model = genai.GenerativeModel("gemini-1.5-flash-001") 
         
         hint_text = ""
         if manual_hint:
             hint_text = f"The user says this document is of type: '{manual_hint}'. Use this context."
 
         prompt = f"""
-        Extract data from this technical certificate. Return ONLY raw JSON. No markdown formatting.
+        Analyze this PDF document and extract technical data. Return ONLY raw JSON.
         
         {hint_text}
         
-        Required JSON Fields:
+        Required Fields:
         - serial (The primary Serial Number / ID)
         - model (Equipment Model Name)
         - cal (Calibration Date YYYY-MM-DD)
@@ -141,17 +147,17 @@ def extract_with_gemini(text, manual_hint=None):
         - type (Classify into one of: ['GD', 'EEBD', 'HARNESS', 'ABSORBER', 'SMOKE HOOD', 'SCBA', 'AREA MONITOR', 'RESCUE KIT'])
 
         If a field is missing, use empty string "".
-        
-        TEXT CONTENT:
-        {text[:15000]}
         """
         
-        response = model.generate_content(prompt)
+        # Send FILE + PROMPT
+        response = model.generate_content([uploaded_file, prompt])
         clean_json = response.text.replace("```json", "").replace("```", "").strip()
+        print(f"🤖 AI Response: {clean_json}")
+        
         return json.loads(clean_json)
 
     except Exception as e:
-        print(f"AI Extraction Error: {e}")
+        print(f"❌ AI Extraction Error: {e}")
         return None
 
 # ==========================================
@@ -159,30 +165,15 @@ def extract_with_gemini(text, manual_hint=None):
 # ==========================================
 
 def process_pdf_text(file_path, is_service=False, manual_type=None):
-    """
-    Reads PDF, asks AI for data, applies Service logic, and formats response.
-    """
     try:
-        # 1. Read Text
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            t = page.extract_text()
-            if t: text += "\n" + t.strip()
-            
-        if not text:
-            return {"status": "failed", "error": "No text found in PDF"}
-
-        # 2. Extract using AI
-        ai_data = extract_with_gemini(text, manual_hint=manual_type)
+        # 1. Direct AI Extraction (No PyPDF2)
+        ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
         
         if not ai_data:
-            return {"status": "failed", "error": "AI extraction failed"}
+            return {"status": "failed", "error": "AI could not extract data"}
 
-        # 3. Determine Final Type
+        # 2. Determine Final Type
         base_type = manual_type if manual_type else ai_data.get("type", "UNKNOWN")
-        
-        # Normalize keys to standard folder names
         type_map = {
             "GAS DETECTOR": "GD", "GAS_DETECTOR": "GD",
             "AREA_MONITOR": "AREA MONITOR", "SMOKE_HOOD": "SMOKE HOOD",
@@ -193,18 +184,17 @@ def process_pdf_text(file_path, is_service=False, manual_type=None):
         if normalized_type in type_map:
             normalized_type = type_map[normalized_type]
             
-        # 4. Apply Service Suffix logic
         final_collection = normalized_type
         if is_service:
             final_collection += "_SERVICE"
 
-        # 5. Return in standard API format
         return {
             "status": "success",
             "type": normalized_type,
             "collection": final_collection,
-            "data": [ai_data] # Return as list to match frontend expectations
+            "data": [ai_data] 
         }
 
     except Exception as e:
+        print(f"❌ Processing Error: {e}")
         return {"error": str(e), "status": "failed"}

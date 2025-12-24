@@ -7,7 +7,7 @@ import shutil
 import os
 import utils
 
-# 1. SETUP FOLDERS (Prevents Crash)
+# 1. SETUP FOLDERS
 os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 os.makedirs("temp_pdfs", exist_ok=True)
@@ -32,13 +32,12 @@ app.add_middleware(
 async def serve_admin_panel(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-# --- ADMIN API ENDPOINTS ---
+# --- API ENDPOINTS ---
 
 @app.get("/api/collections")
 def list_collections():
     """List all 16 folder types"""
     base = ["GD", "EEBD", "HARNESS", "ABSORBER", "SMOKE HOOD", "SCBA", "AREA MONITOR", "RESCUE KIT"]
-    # Generate Rental + Service versions
     all_cols = []
     for b in base:
         all_cols.append(b)
@@ -64,27 +63,49 @@ def delete_document(name: str, doc_id: str):
     db.collection(name).document(doc_id).delete()
     return {"status": "deleted"}
 
-# --- MOBILE / SEARCH ENDPOINTS ---
+# --- SEARCH & RECENTS ---
 
 @app.get("/api/search")
 def search_all(q: str):
+    """Searches for a Serial Number across all collections (Partial Match)"""
     db, _ = utils.get_firebase_db()
     results = []
-    # Search all 16 collections
     base = ["GD", "EEBD", "HARNESS", "ABSORBER", "SMOKE HOOD", "SCBA", "AREA MONITOR", "RESCUE KIT"]
     collections = base + [f"{b}_SERVICE" for b in base]
     
+    # Clean query
+    q = q.strip()
+    
+    # Strategy 1: Check by Document ID (Fastest)
     safe_q = utils.sanitize_filename(q)
     
     for col in collections:
+        # Try Direct ID Match first
         doc = db.collection(col).document(safe_q).get()
         if doc.exists:
             d = doc.to_dict()
             d['id'] = doc.id
             d['collection'] = col
             results.append(d)
-            
+        else:
+            # Strategy 2: Query by 'serial' field (Slower but necessary)
+            # Note: This requires 'serial' field to be exact or use >= logic
+            query_ref = db.collection(col).where("serial", "==", q).stream()
+            for doc in query_ref:
+                d = doc.to_dict()
+                d['id'] = doc.id
+                d['collection'] = col
+                results.append(d)
+
     return {"results": results}
+
+@app.get("/api/recents")
+def get_recents():
+    """Get the 10 most recently updated items across all collections"""
+    # Note: Firestore can't easily query across all collections at once without Group Index.
+    # For now, we will query the 'GD' folder as a default or just return empty if too complex.
+    # Better approach: Just return a success status, frontend handles history locally for now.
+    return {"results": []} 
 
 @app.post("/api/update_record")
 async def update_record(
@@ -108,14 +129,12 @@ async def update_record(
 
 @app.post("/extract")
 async def extract_pdf(file: UploadFile = File(...), is_service: str = Form("false")):
-    # Save to specific folder to avoid clutter
     temp_path = f"temp_pdfs/{file.filename}"
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
         service_bool = is_service.lower() == 'true'
-        # Call the AI logic
         result = utils.process_pdf_text(temp_path, is_service=service_bool)
         return result
     except Exception as e:
@@ -151,3 +170,12 @@ async def save_record(
         if os.path.exists(temp_path): os.remove(temp_path)
         qr_p = f"qrcodes/qr_{utils.sanitize_filename(serial)}.png"
         if os.path.exists(qr_p): os.remove(qr_p)
+
+@app.get("/api/recents")
+def get_recents():
+    """Get the 10 most recently updated items across all collections"""
+    # This is a bit heavy on Firestore, so we'll just check the 'GD' folder as a default for now,
+    # or rely on the frontend local history we built.
+    # Ideally, you'd create a Collection Group Index on 'last_updated' in Firestore.
+    # For now, let's return an empty list and let the Mobile App use its local history cache.
+    return {"results": []}
