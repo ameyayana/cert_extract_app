@@ -1,8 +1,12 @@
-streamlit
-firebase-admin
-qrcode
-Pillow
-PyPDF2
 fastapi
 uvicorn
 python-multipart
+firebase-admin
+pypdf2
+pillow
+qrcode
+gunicorn
+google-generativeai
+python-dotenv
+streamlit
+jinja2

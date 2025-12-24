@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cert Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  </head>
+  <body class="bg-gray-100 h-screen flex overflow-hidden">
+    <div class="w-64 bg-white shadow-md flex flex-col">
+      <div class="p-6 border-b">
+        <h1 class="text-2xl font-bold text-blue-600">
+          <i class="fas fa-shield-alt"></i> Cert Admin
+        </h1>
+      </div>
+      <nav class="flex-1 overflow-y-auto p-4" id="collectionList">
+        <div class="text-gray-400 text-sm text-center mt-4">
+          Loading collections...
+        </div>
+      </nav>
+      <div class="p-4 border-t bg-gray-50">
+        <button
+          onclick="showUploadModal()"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-semibold transition"
+        >
+          <i class="fas fa-cloud-upload-alt"></i> Upload New
+        </button>
+      </div>
+    </div>
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <header
+        class="bg-white shadow-sm p-4 flex justify-between items-center z-10"
+      >
+        <h2
+          id="currentCollectionTitle"
+          class="text-xl font-semibold text-gray-800"
+        >
+          Dashboard
+        </h2>
+        <div class="text-sm text-gray-500">Render Hosted • v2.0</div>
+      </header>
+
+      <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-6">
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <table class="min-w-full leading-normal">
+            <thead>
+              <tr
+                class="bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider"
+              >
+                <th class="px-5 py-3">Serial No</th>
+                <th class="px-5 py-3">Model</th>
+                <th class="px-5 py-3">Expiry</th>
+                <th class="px-5 py-3">Last Updated</th>
+                <th class="px-5 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <tr>
+                <td colspan="5" class="px-5 py-10 text-center text-gray-500">
+                  Select a collection to view data
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+
+    <div
+      id="uploadModal"
+      class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50"
+    >
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-xl font-bold">Upload Certificate</h3>
+          <button
+            onclick="closeModal('uploadModal')"
+            class="text-gray-400 hover:text-gray-600"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div id="step1">
+          <div
+            class="border-2 border-dashed border-gray-300 rounded-lg p-10 text-center hover:bg-gray-50 transition cursor-pointer"
+            onclick="document.getElementById('fileInput').click()"
+          >
+            <i class="fas fa-file-pdf text-4xl text-gray-400 mb-3"></i>
+            <p class="text-gray-600">Click to Select PDF</p>
+            <input
+              type="file"
+              id="fileInput"
+              class="hidden"
+              accept="application/pdf"
+              onchange="handleFileSelect()"
+            />
+          </div>
+        </div>
+
+        <div id="step2" class="hidden space-y-3">
+          <div class="grid grid-cols-2 gap-4">
+            <input
+              id="editSerial"
+              class="border p-2 rounded"
+              placeholder="Serial No"
+            />
+            <input
+              id="editModel"
+              class="border p-2 rounded"
+              placeholder="Model"
+            />
+            <input
+              id="editCal"
+              class="border p-2 rounded"
+              placeholder="Cal Date"
+            />
+            <input
+              id="editExp"
+              class="border p-2 rounded"
+              placeholder="Exp Date"
+            />
+            <input
+              id="editCert"
+              class="border p-2 rounded"
+              placeholder="Cert No"
+            />
+            <input
+              id="editLot"
+              class="border p-2 rounded"
+              placeholder="Lot No"
+            />
+            <input id="editCollection" type="hidden" />
+          </div>
+          <button
+            onclick="saveData()"
+            class="w-full bg-green-600 text-white py-2 rounded font-bold mt-4"
+          >
+            Save & Upload
+          </button>
+        </div>
+
+        <div id="loading" class="hidden text-center py-10">
+          <i class="fas fa-spinner fa-spin text-3xl text-blue-600"></i>
+          <p class="mt-2 text-gray-500">Processing...</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // API Base URL (Relative path works because web app is on same server)
+      const API = "";
+      let currentFile = null;
+
+      // Load Collections on Start
+      async function loadCollections() {
+        const res = await axios.get(`${API}/api/collections`);
+        const nav = document.getElementById("collectionList");
+        nav.innerHTML = res.data.collections
+          .map(
+            (c) =>
+              `<button onclick="loadData('${c}')" class="w-full text-left px-4 py-2 rounded hover:bg-blue-50 text-gray-700 font-medium mb-1">
+                    <i class="fas fa-folder mr-2 text-yellow-500"></i> ${c}
+                </button>`
+          )
+          .join("");
+      }
+
+      async function loadData(collection) {
+        document.getElementById("currentCollectionTitle").innerText =
+          collection;
+        const tbody = document.getElementById("tableBody");
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>`;
+
+        try {
+          const res = await axios.get(`${API}/api/collection/${collection}`);
+          tbody.innerHTML = res.data.data
+            .map(
+              (item) => `
+                    <tr class="hover:bg-gray-50 border-b border-gray-100">
+                        <td class="px-5 py-3 font-bold text-gray-800">${
+                          item.serial
+                        }</td>
+                        <td class="px-5 py-3 text-gray-600">${item.model}</td>
+                        <td class="px-5 py-3"><span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">${
+                          item.expiry_date
+                        }</span></td>
+                        <td class="px-5 py-3 text-sm text-gray-500">${new Date(
+                          item.last_updated
+                        ).toLocaleDateString()}</td>
+                        <td class="px-5 py-3 text-right space-x-2">
+                            <a href="${
+                              item.pdf_url
+                            }" target="_blank" class="text-blue-500 hover:text-blue-700" title="View PDF"><i class="fas fa-eye"></i></a>
+                            <button onclick="deleteItem('${collection}', '${
+                item.serial
+              }')" class="text-red-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `
+            )
+            .join("");
+        } catch (e) {
+          tbody.innerHTML = `<tr><td colspan="5" class="text-center text-red-500">Error loading data</td></tr>`;
+        }
+      }
+
+      // Upload Logic
+      function showUploadModal() {
+        document.getElementById("uploadModal").classList.remove("hidden");
+        document.getElementById("step1").classList.remove("hidden");
+        document.getElementById("step2").classList.add("hidden");
+      }
+      function closeModal(id) {
+        document.getElementById(id).classList.add("hidden");
+      }
+
+      async function handleFileSelect() {
+        const file = document.getElementById("fileInput").files[0];
+        if (!file) return;
+        currentFile = file;
+
+        document.getElementById("step1").classList.add("hidden");
+        document.getElementById("loading").classList.remove("hidden");
+
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("is_service", "false");
+
+        try {
+          const res = await axios.post(`${API}/extract`, formData);
+          const data = res.data.data[0];
+
+          document.getElementById("editSerial").value = data.serial || "";
+          document.getElementById("editModel").value = data.model || "";
+          document.getElementById("editCal").value = data.cal || "";
+          document.getElementById("editExp").value = data.exp || "";
+          document.getElementById("editCert").value = data.cert || "";
+          document.getElementById("editLot").value = data.lot || "";
+          document.getElementById("editCollection").value =
+            res.data.collection || "UNKNOWN";
+
+          document.getElementById("loading").classList.add("hidden");
+          document.getElementById("step2").classList.remove("hidden");
+        } catch (e) {
+          alert("Extraction failed");
+          closeModal("uploadModal");
+        }
+      }
+
+      async function saveData() {
+        const formData = new FormData();
+        formData.append("file", currentFile);
+        formData.append("serial", document.getElementById("editSerial").value);
+        formData.append("model", document.getElementById("editModel").value);
+        formData.append("cal", document.getElementById("editCal").value);
+        formData.append("exp", document.getElementById("editExp").value);
+        formData.append("cert", document.getElementById("editCert").value);
+        formData.append("lot", document.getElementById("editLot").value);
+        formData.append(
+          "collection",
+          document.getElementById("editCollection").value
+        );
+
+        try {
+          await axios.post(`${API}/save`, formData);
+          alert("Saved Successfully!");
+          closeModal("uploadModal");
+          loadData(document.getElementById("editCollection").value);
+        } catch (e) {
+          alert("Save failed");
+        }
+      }
+
+      async function deleteItem(collection, id) {
+        if (!confirm("Are you sure?")) return;
+        await axios.delete(`${API}/api/collection/${collection}/${id}`);
+        loadData(collection);
+      }
+
+      loadCollections();
+    </script>
+  </body>
+</html>
