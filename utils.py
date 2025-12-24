@@ -2,12 +2,21 @@ import os
 import re
 import json
 import base64
+import qrcode
+from urllib.parse import quote_plus
 from datetime import datetime
 from PyPDF2 import PdfReader
+from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 
 # ==========================================
-# 1. FIREBASE SETUP
+# 1. CONFIGURATION
+# ==========================================
+QR_DIR = "qrcodes"
+os.makedirs(QR_DIR, exist_ok=True)
+
+# ==========================================
+# 2. FIREBASE SETUP
 # ==========================================
 def get_firebase_db():
     """Initializes Firebase if not already initialized."""
@@ -16,7 +25,6 @@ def get_firebase_db():
 
     if not _apps:
         if not FIREBASE_CREDENTIALS:
-            # Fallback for local testing if env var is missing, though Render needs it
             print("Warning: FIREBASE_CREDENTIALS not found.")
             return None, None
         
@@ -31,14 +39,13 @@ def get_firebase_db():
     return firestore.client(), storage.bucket()
 
 # ==========================================
-# 2. HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS
 # ==========================================
 def format_date(date_str):
     if not date_str or date_str in ["Unknown", "Invalid"]:
         return "Invalid"
     date_str = date_str.strip()
     
-    # Try multiple formats
     date_formats = [
         "%B %d, %Y",  # November 14, 2025
         "%d/%m/%Y",   # 14/11/2025
@@ -55,29 +62,111 @@ def format_date(date_str):
 def sanitize_filename(name):
     return re.sub(r'[\\/:"*?<>|]', "_", str(name))
 
+def generate_qr_image_only(serial, link):
+    """
+    Generates a QR code image locally and returns the path.
+    Does NOT depend on Streamlit.
+    """
+    safe_serial = sanitize_filename(serial)
+    size = 500
+    
+    # Create QR
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=10,
+        border=4
+    )
+    qr.add_data(link)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+    qr_img = qr_img.resize((size, size), Image.Resampling.NEAREST)
+
+    # Label section
+    label_height = 100
+    label = Image.new("RGBA", (size, label_height), "white")
+    draw = ImageDraw.Draw(label)
+    
+    # Simple Font loading (fallback to default if custom fonts fail)
+    try:
+        font = ImageFont.load_default()
+    except:
+        font = None
+
+    text = f"SN: {serial}"
+    # Draw text roughly centered (simple estimation)
+    draw.text((20, 30), text, fill="black", font=font)
+
+    # Merge
+    final = Image.new("RGBA", (size, size + label_height), "white")
+    final.paste(qr_img, (0, 0))
+    final.paste(label, (0, size))
+
+    path = os.path.join(QR_DIR, f"qr_{safe_serial}.png")
+    final.convert("RGB").save(path)
+    return path
+
 # ==========================================
-# 3. EXTRACTION LOGIC (From your old main.py)
+# 4. FIREBASE UPLOADERS
+# ==========================================
+def upload_to_firebase_storage(path, serial, is_qr=False):
+    try:
+        _, bucket = get_firebase_db()
+        if not bucket: return None
+        
+        safe_serial = sanitize_filename(serial)
+        blob_name = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}.pdf"
+        blob = bucket.blob(blob_name)
+
+        blob.upload_from_filename(path)
+        blob.make_public()
+        return blob.public_url
+    except Exception as e:
+        print(f"Upload Error: {e}")
+        return None
+
+def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
+    try:
+        db, _ = get_firebase_db()
+        if not db: return False
+        
+        safe_doc_id = sanitize_filename(serial)
+        doc_ref = db.collection(collection_name).document(safe_doc_id)
+
+        doc_data = {
+            "cert": data.get("cert", ""),
+            "model": data.get("model", ""),
+            "serial": serial,
+            "calibration_date": data.get("cal", ""),
+            "expiry_date": data.get("exp", ""),
+            "lot": data.get("lot", ""),
+            "pdf_url": pdf_url,
+            "qr_image_url": qr_url,
+            "qr_link": qr_link,
+            "last_updated": firestore.SERVER_TIMESTAMP
+        }
+
+        doc_ref.set(doc_data, merge=True)
+        return True
+    except Exception as e:
+        print(f"Firestore Error: {e}")
+        return False
+
+# ==========================================
+# 5. EXTRACTION LOGIC
 # ==========================================
 
 def extract_template_type(text, lines):
     """Determines the certificate type based on keywords."""
-    # Convert text to lower for easier matching
     text_lower = text.lower()
     
     if "absorber" in text: return "absorber"
     if "full body harness" in text or "professional harnesses" in text: return "harness"
-    
-    # EEBD check
     if any(k in l.lower() for l in lines for k in ["eebd refil", "spiroscape", "interspiro", "escape-15", "eebd"]): return "eebd"
-    
     if "self-contained breathing apparatus" in text_lower or "scba" in text_lower: return "scba"
     if "rigrat" in text_lower or "area monitor" in text_lower: return "area_monitor"
     if "smoke hood" in text_lower or "draeger parat" in text_lower: return "smoke_hood"
     if "rescue kit" in text: return "rescue_kit"
-    
-    # Gas Detector check
     if "certificate" in text_lower and "calibration" in text_lower: return "gas_detector"
-    
     return "unknown"
 
 # --- Individual Extractors ---
@@ -369,7 +458,7 @@ def extract_gas_detector(text, lines):
     return [data]
 
 # ==========================================
-# 4. MAIN PROCESSOR (For API)
+# 6. MAIN PROCESSOR (For API)
 # ==========================================
 
 def process_pdf_text(file_path, is_service=False):
