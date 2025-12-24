@@ -6,15 +6,18 @@ from fastapi.responses import HTMLResponse
 import shutil
 import os
 import utils
-import utils
+
+# 1. SETUP FOLDERS (Prevents Crash)
+os.makedirs("static", exist_ok=True)
+os.makedirs("templates", exist_ok=True)
+os.makedirs("temp_pdfs", exist_ok=True)
 
 app = FastAPI()
 
-# 1. Mount Static Files (For Logo)
-# Create a folder named 'static' in backend and put chsb_logo.png there
+# 2. Mount Static Files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# 2. Setup Templates
+# 3. Setup Templates
 templates = Jinja2Templates(directory="templates")
 
 app.add_middleware(
@@ -105,7 +108,8 @@ async def update_record(
 
 @app.post("/extract")
 async def extract_pdf(file: UploadFile = File(...), is_service: str = Form("false")):
-    temp_path = f"temp_{file.filename}"
+    # Save to specific folder to avoid clutter
+    temp_path = f"temp_pdfs/{file.filename}"
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -127,7 +131,7 @@ async def save_record(
     cert: str = Form(...), collection: str = Form(...),
     lot: str = Form(...)
 ):
-    temp_path = f"save_{file.filename}"
+    temp_path = f"temp_pdfs/save_{file.filename}"
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)

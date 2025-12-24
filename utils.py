@@ -16,7 +16,7 @@ from firebase_admin import credentials, firestore, storage, initialize_app, _app
 QR_DIR = "qrcodes"
 os.makedirs(QR_DIR, exist_ok=True)
 
-# Configure Gemini (Get key from https://aistudio.google.com/)
+# Configure Gemini
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
@@ -147,7 +147,6 @@ def extract_with_gemini(text, manual_hint=None):
         """
         
         response = model.generate_content(prompt)
-        # Clean up potential markdown code blocks
         clean_json = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_json)
 
@@ -181,10 +180,9 @@ def process_pdf_text(file_path, is_service=False, manual_type=None):
             return {"status": "failed", "error": "AI extraction failed"}
 
         # 3. Determine Final Type
-        # If user manually selected a type, force it. Otherwise use AI's detection.
         base_type = manual_type if manual_type else ai_data.get("type", "UNKNOWN")
         
-        # Normalize keys (AI might return "Gas Detector", we need "GD")
+        # Normalize keys to standard folder names
         type_map = {
             "GAS DETECTOR": "GD", "GAS_DETECTOR": "GD",
             "AREA_MONITOR": "AREA MONITOR", "SMOKE_HOOD": "SMOKE HOOD",
