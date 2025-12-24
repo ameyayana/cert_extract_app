@@ -1,0 +1,8 @@
+streamlit
+firebase-admin
+qrcode
+Pillow
+PyPDF2
+fastapi
+uvicorn
+python-multipart
