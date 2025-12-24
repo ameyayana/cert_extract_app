@@ -118,15 +118,24 @@ def extract_with_gemini(file_path, manual_hint=None):
         return None
 
     try:
-        # ✅ NEW: Use Native PDF Support (Fixes Scanned Image issues)
+        # 1. Upload File
         print(f"📤 Uploading {file_path} to Gemini...")
         uploaded_file = genai.upload_file(file_path, mime_type="application/pdf")
         
-        # Wait for processing
-        time.sleep(2) 
-        
-        # Use specific stable model version to fix 404 errors
-        model = genai.GenerativeModel("gemini-1.5-flash-001") 
+        # 2. Robust Wait Loop (Crucial for 404/Processing errors)
+        print("⏳ Waiting for PDF processing...")
+        while uploaded_file.state.name == "PROCESSING":
+            time.sleep(1)
+            uploaded_file = genai.get_file(uploaded_file.name)
+            
+        if uploaded_file.state.name == "FAILED":
+            print("❌ PDF Processing Failed on Google Server.")
+            return None
+
+        print("✅ PDF Ready. Asking Gemini...")
+
+        # 3. Use Latest Model
+        model = genai.GenerativeModel("gemini-1.5-flash") 
         
         hint_text = ""
         if manual_hint:
@@ -138,8 +147,8 @@ def extract_with_gemini(file_path, manual_hint=None):
         {hint_text}
         
         Required Fields:
-        - serial (The primary Serial Number / ID)
-        - model (Equipment Model Name)
+        - serial (The primary Serial Number / ID. Look for 'S/N', 'Serial No', or similar patterns)
+        - model (Equipment Model Name / Description)
         - cal (Calibration Date YYYY-MM-DD)
         - exp (Expiry/Next Due Date YYYY-MM-DD)
         - cert (Certificate Number)
@@ -149,11 +158,17 @@ def extract_with_gemini(file_path, manual_hint=None):
         If a field is missing, use empty string "".
         """
         
-        # Send FILE + PROMPT
+        # 4. Generate Content
         response = model.generate_content([uploaded_file, prompt])
         clean_json = response.text.replace("```json", "").replace("```", "").strip()
         print(f"🤖 AI Response: {clean_json}")
         
+        # 5. Cleanup (Optional but good practice)
+        try:
+            uploaded_file.delete()
+        except:
+            pass
+
         return json.loads(clean_json)
 
     except Exception as e:
@@ -166,13 +181,13 @@ def extract_with_gemini(file_path, manual_hint=None):
 
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     try:
-        # 1. Direct AI Extraction (No PyPDF2)
+        # Go Straight to AI (Best for Scanned Docs & Images)
         ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
         
         if not ai_data:
             return {"status": "failed", "error": "AI could not extract data"}
 
-        # 2. Determine Final Type
+        # Determine Final Type
         base_type = manual_type if manual_type else ai_data.get("type", "UNKNOWN")
         type_map = {
             "GAS DETECTOR": "GD", "GAS_DETECTOR": "GD",
