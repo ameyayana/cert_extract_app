@@ -1,23 +1,20 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import shutil
 import os
 import utils
 
-# 1. SETUP FOLDERS
+# --- SETUP ---
 os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 os.makedirs("temp_pdfs", exist_ok=True)
 
 app = FastAPI()
 
-# 2. Mount Static Files
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# 3. Setup Templates
 templates = Jinja2Templates(directory="templates")
 
 app.add_middleware(
@@ -27,155 +24,155 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- WEB DASHBOARD ---
+# --- WEB ---
 @app.get("/", response_class=HTMLResponse)
 async def serve_admin_panel(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-# --- API ENDPOINTS ---
-
+# --- COLLECTIONS ---
 @app.get("/api/collections")
 def list_collections():
-    """List all 16 folder types"""
     base = ["GD", "EEBD", "HARNESS", "ABSORBER", "SMOKE HOOD", "SCBA", "AREA MONITOR", "RESCUE KIT"]
-    all_cols = []
-    for b in base:
-        all_cols.append(b)
-        all_cols.append(f"{b}_SERVICE")
-    return {"collections": all_cols}
+    return {
+        "collections": [c for b in base for c in (b, f"{b}_SERVICE")]
+    }
 
 @app.get("/api/collection/{name}")
 def get_collection_data(name: str):
     db, _ = utils.get_firebase_db()
     docs = db.collection(name).stream()
+
     data = []
     for doc in docs:
         d = doc.to_dict()
-        d['id'] = doc.id
-        if 'last_updated' in d and d['last_updated']:
-            d['last_updated'] = d['last_updated'].isoformat()
+        d["id"] = doc.id
+
+        if d.get("last_updated"):
+            d["last_updated"] = d["last_updated"].isoformat()
+
         data.append(d)
+
     return {"data": data}
 
-@app.delete("/api/collection/{name}/{doc_id}")
-def delete_document(name: str, doc_id: str):
-    db, _ = utils.get_firebase_db()
-    db.collection(name).document(doc_id).delete()
-    return {"status": "deleted"}
-
-# --- SEARCH & RECENTS ---
-
+# --- SEARCH ---
 @app.get("/api/search")
 def search_all(q: str):
-    """Searches for a Serial Number across all collections (Partial Match)"""
     db, _ = utils.get_firebase_db()
-    results = []
+    q = q.strip()
+
     base = ["GD", "EEBD", "HARNESS", "ABSORBER", "SMOKE HOOD", "SCBA", "AREA MONITOR", "RESCUE KIT"]
     collections = base + [f"{b}_SERVICE" for b in base]
-    
-    # Clean query
-    q = q.strip()
-    
-    # Strategy 1: Check by Document ID (Fastest)
+
+    results = []
+
     safe_q = utils.sanitize_filename(q)
-    
+
     for col in collections:
-        # Try Direct ID Match first
         doc = db.collection(col).document(safe_q).get()
         if doc.exists:
             d = doc.to_dict()
-            d['id'] = doc.id
-            d['collection'] = col
+            d["id"] = doc.id
+            d["collection"] = col
             results.append(d)
-        else:
-            # Strategy 2: Query by 'serial' field (Slower but necessary)
-            # Note: This requires 'serial' field to be exact or use >= logic
-            query_ref = db.collection(col).where("serial", "==", q).stream()
-            for doc in query_ref:
-                d = doc.to_dict()
-                d['id'] = doc.id
-                d['collection'] = col
-                results.append(d)
+            continue
+
+        for doc in db.collection(col).where("serial", "==", q).stream():
+            d = doc.to_dict()
+            d["id"] = doc.id
+            d["collection"] = col
+            results.append(d)
 
     return {"results": results}
 
-@app.get("/api/recents")
-def get_recents():
-    """Get the 10 most recently updated items across all collections"""
-    # Note: Firestore can't easily query across all collections at once without Group Index.
-    # For now, we will query the 'GD' folder as a default or just return empty if too complex.
-    # Better approach: Just return a success status, frontend handles history locally for now.
-    return {"results": []} 
-
+# --- UPDATE ---
 @app.post("/api/update_record")
 async def update_record(
     collection: str = Form(...),
     serial: str = Form(...),
-    model: str = Form(...),
-    cal: str = Form(...),
-    exp: str = Form(...),
-    cert: str = Form(...),
-    lot: str = Form(...)
+    model: str = Form(""),
+    cal: str = Form(""),
+    exp: str = Form(""),
+    cert: str = Form(""),
+    lot: str = Form("")
 ):
     db, _ = utils.get_firebase_db()
-    data = {
-        "model": model, "calibration_date": cal, 
-        "expiry_date": exp, "cert": cert, "lot": lot
-    }
-    db.collection(collection).document(utils.sanitize_filename(serial)).update(data)
+
+    db.collection(collection).document(
+        utils.sanitize_filename(serial)
+    ).update({
+        "model": model,
+        "cal": cal,
+        "exp": exp,
+        "cert": cert,
+        "lot": lot
+    })
+
     return {"status": "success"}
 
-# --- EXTRACTION & UPLOAD ---
-
+# --- EXTRACT ---
 @app.post("/extract")
-async def extract_pdf(file: UploadFile = File(...), is_service: str = Form("false")):
+async def extract_pdf(
+    file: UploadFile = File(...),
+    is_service: str = Form("false")
+):
     temp_path = f"temp_pdfs/{file.filename}"
+
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        service_bool = is_service.lower() == 'true'
-        result = utils.process_pdf_text(temp_path, is_service=service_bool)
-        return result
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-    finally:
-        if os.path.exists(temp_path): os.remove(temp_path)
 
+        return utils.process_pdf_text(
+            temp_path,
+            is_service=is_service.lower() == "true"
+        )
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+# --- SAVE ---
 @app.post("/save")
 async def save_record(
     file: UploadFile = File(...),
-    serial: str = Form(...), model: str = Form(...),
-    cal: str = Form(...), exp: str = Form(...),
-    cert: str = Form(...), collection: str = Form(...),
-    lot: str = Form(...)
+    serial: str = Form(...),
+    model: str = Form(""),
+    cal: str = Form(""),
+    exp: str = Form(""),
+    cert: str = Form(""),
+    lot: str = Form(""),
+    collection: str = Form(...)
 ):
-    temp_path = f"temp_pdfs/save_{file.filename}"
+    temp_path = f"temp_pdfs/{file.filename}"
+
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
+
         pdf_url = utils.upload_to_firebase_storage(temp_path, serial, is_qr=False)
         qr_link = f"https://qrcertificates-30ddb.web.app/?id={utils.quote_plus(serial)}"
-        qr_local_path = utils.generate_qr_image_only(serial, qr_link)
-        qr_image_url = utils.upload_to_firebase_storage(qr_local_path, serial, is_qr=True)
+        qr_path = utils.generate_qr_image_only(serial, qr_link)
+        qr_image_url = utils.upload_to_firebase_storage(qr_path, serial, is_qr=True)
 
-        data = {"cert": cert, "model": model, "cal": cal, "exp": exp, "lot": lot}
-        utils.update_firestore_record(collection, serial, data, pdf_url, qr_image_url, qr_link)
+        utils.update_firestore_record(
+            collection,
+            serial,
+            {
+                "model": model,
+                "cal": cal,
+                "exp": exp,
+                "cert": cert,
+                "lot": lot
+            },
+            pdf_url,
+            qr_image_url,
+            qr_link
+        )
 
-        return {"status": "success", "web_link": qr_link, "serial": serial}
+        return {"status": "success", "web_link": qr_link}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(temp_path): os.remove(temp_path)
-        qr_p = f"qrcodes/qr_{utils.sanitize_filename(serial)}.png"
-        if os.path.exists(qr_p): os.remove(qr_p)
 
-@app.get("/api/recents")
-def get_recents():
-    """Get the 10 most recently updated items across all collections"""
-    # This is a bit heavy on Firestore, so we'll just check the 'GD' folder as a default for now,
-    # or rely on the frontend local history we built.
-    # Ideally, you'd create a Collection Group Index on 'last_updated' in Firestore.
-    # For now, let's return an empty list and let the Mobile App use its local history cache.
-    return {"results": []}
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
