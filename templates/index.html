@@ -19,6 +19,16 @@
         border: 1px dashed #ccc;
         font-size: 0.85rem;
       }
+      /* Smooth fade for modals */
+      .modal-enter {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+      .modal-enter-active {
+        opacity: 1;
+        transform: scale(1);
+        transition: opacity 200ms, transform 200ms;
+      }
     </style>
   </head>
   <body class="bg-gray-50 h-screen flex flex-col">
@@ -129,7 +139,15 @@
           class="bg-white p-8 rounded-xl shadow-lg w-full max-w-4xl flex gap-6"
         >
           <div class="flex-1">
-            <h3 class="text-xl font-bold mb-4 text-gray-800">New Entry</h3>
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="text-xl font-bold text-gray-800">New Entry</h3>
+              <button
+                onclick="resetUpload()"
+                class="text-xs text-blue-500 hover:underline"
+              >
+                Clear Form
+              </button>
+            </div>
 
             <div class="flex mb-4">
               <button
@@ -155,13 +173,14 @@
             >
               <i class="fas fa-file-pdf text-3xl text-gray-400 mb-2"></i>
               <p class="text-sm text-gray-600" id="fileNameDisplay">
-                Click to Select PDF (Optional for manual)
+                Click to Select PDF(s) - Supports Batch Upload
               </p>
               <input
                 type="file"
                 id="fileInput"
                 class="hidden"
                 accept="application/pdf"
+                multiple
                 onchange="handleFileSelect()"
               />
             </div>
@@ -221,11 +240,11 @@
 
             <input type="hidden" id="upCollection" />
             <button
-              onclick="saveUpload()"
+              onclick="saveManual()"
               id="btnSave"
               class="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 shadow transition"
             >
-              Save Record
+              Save Manual Entry
             </button>
           </div>
 
@@ -236,7 +255,7 @@
 
             <div
               id="pdfPreviewFrame"
-              class="h-40 bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs"
+              class="h-40 bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs overflow-hidden"
             >
               No PDF Selected
             </div>
@@ -247,7 +266,7 @@
               >
               <div
                 id="nfcPreview"
-                class="nfc-box break-all select-all cursor-pointer"
+                class="nfc-box break-all select-all cursor-pointer bg-white"
                 onclick="copyNfc()"
                 title="Click to Copy"
               >
@@ -259,7 +278,10 @@
               <label class="text-xs font-bold text-gray-500 mb-1 block"
                 >QR Link</label
               >
-              <div id="qrLinkPreview" class="text-xs text-blue-600 break-all">
+              <div
+                id="qrLinkPreview"
+                class="text-xs text-blue-600 break-all bg-white p-2 rounded border border-gray-100"
+              >
                 ...
               </div>
             </div>
@@ -272,7 +294,7 @@
         class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50"
       >
         <div
-          class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative"
+          class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative transform transition-all scale-100"
         >
           <button
             onclick="closeModal('detailModal')"
@@ -314,14 +336,14 @@
               id="btnViewPdf"
               href="#"
               target="_blank"
-              class="flex-1 bg-blue-600 text-white py-2 rounded text-center font-bold hover:bg-blue-700"
+              class="flex-1 bg-blue-600 text-white py-2 rounded text-center font-bold hover:bg-blue-700 transition"
               ><i class="fas fa-file-pdf mr-2"></i> View PDF</a
             >
             <a
               id="btnViewQr"
               href="#"
               target="_blank"
-              class="flex-1 bg-gray-800 text-white py-2 rounded text-center font-bold hover:bg-gray-900"
+              class="flex-1 bg-gray-800 text-white py-2 rounded text-center font-bold hover:bg-gray-900 transition"
               ><i class="fas fa-qrcode mr-2"></i> QR Image</a
             >
           </div>
@@ -332,7 +354,7 @@
             >
             <div
               id="detNfc"
-              class="nfc-box select-all cursor-pointer"
+              class="nfc-box select-all cursor-pointer hover:bg-gray-200 transition"
               onclick="copyText('detNfc')"
             ></div>
           </div>
@@ -344,9 +366,11 @@
         class="fixed inset-0 bg-white bg-opacity-90 hidden flex items-center justify-center z-50"
       >
         <div class="text-center">
-          <i class="fas fa-robot fa-spin text-5xl text-blue-600 mb-4"></i>
-          <h3 class="text-xl font-bold text-gray-800">AI Processing...</h3>
-          <p class="text-gray-500">Reading PDF & Extracting Data</p>
+          <i
+            class="fas fa-circle-notch fa-spin text-5xl text-blue-600 mb-4"
+          ></i>
+          <h3 class="text-xl font-bold text-gray-800">Processing...</h3>
+          <p id="loadingText" class="text-gray-500 mt-2">Please wait</p>
         </div>
       </div>
     </main>
@@ -453,7 +477,6 @@
 
         tbody.innerHTML = data
           .map((item) => {
-            // Encode item data safely for onclick
             const safeItem = JSON.stringify(item).replace(/"/g, "&quot;");
             return `
                 <tr class="hover:bg-gray-50 transition border-b border-gray-100 cursor-pointer" onclick="showDetails(${safeItem})">
@@ -467,12 +490,12 @@
                     <td class="px-6 py-3 text-right space-x-3" onclick="event.stopPropagation()">
                         ${
                           item.pdf_url
-                            ? `<a href="${item.pdf_url}" target="_blank" class="text-blue-500 hover:text-blue-700"><i class="fas fa-file-pdf"></i></a>`
+                            ? `<a href="${item.pdf_url}" target="_blank" class="text-blue-500 hover:text-blue-700" title="PDF"><i class="fas fa-file-pdf"></i></a>`
                             : ""
                         }
                         ${
                           collectionName
-                            ? `<button onclick="deleteItem('${collectionName}', '${item.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>`
+                            ? `<button onclick="deleteItem('${collectionName}', '${item.id}')" class="text-red-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>`
                             : ""
                         }
                     </td>
@@ -482,7 +505,6 @@
           .join("");
       }
 
-      // --- DETAILS MODAL ---
       function showDetails(item) {
         document.getElementById("detSerial").innerText = item.serial;
         document.getElementById("detModel").innerText = item.model;
@@ -507,57 +529,80 @@
         document.getElementById("detailModal").classList.remove("hidden");
       }
 
-      // --- UPLOAD / ADD LOGIC ---
+      // --- BATCH UPLOAD LOGIC ---
       async function handleFileSelect() {
-        const files = document.getElementById("fileInput").files; // Get ALL files
+        const files = document.getElementById("fileInput").files;
         if (!files.length) return;
 
         document.getElementById("loading").classList.remove("hidden");
-
         let successCount = 0;
         let failCount = 0;
 
-        // Loop through files one by one
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-
-          // Update UI to show progress
-          document.querySelector("#loading p").innerText = `Processing ${
+          document.getElementById("loadingText").innerText = `Processing file ${
             i + 1
-          } of ${files.length}...`;
-
-          const fd = new FormData();
-          fd.append("file", file);
-          fd.append("is_service", isServiceUpload);
+          } of ${files.length}: ${file.name}`;
 
           try {
-            // 1. Extract
-            const res = await axios.post(`${API}/extract`, fd);
-            const d = res.data.data[0];
+            // 1. EXTRACT
+            const extractFd = new FormData();
+            extractFd.append("file", file);
+            extractFd.append("is_service", isServiceUpload);
 
-            // 2. Auto-Save (if you trust the AI 100%)
-            // OR just populate the form for the LAST one (current behavior)
-            // For batching, you usually want to auto-save or add to a review list.
+            const resExt = await axios.post(`${API}/extract`, extractFd);
+            if (resExt.data.status !== "success")
+              throw new Error(resExt.data.error || "Extraction failed");
 
-            // NOTE: To stay safe under 15 RPM (1 request every 4 seconds):
-            // We need a delay. AI takes ~2-3s, so adding 2s sleep is safe.
-            await new Promise((r) => setTimeout(r, 2000));
+            const d = resExt.data.data[0];
+            const col = resExt.data.collection;
 
+            // 2. SAVE
+            const saveFd = new FormData();
+            saveFd.append("file", file);
+            saveFd.append("serial", d.serial);
+            saveFd.append("model", d.model);
+            saveFd.append("cal", d.cal);
+            saveFd.append("exp", d.exp);
+            saveFd.append("cert", d.cert);
+            saveFd.append("lot", d.lot);
+            saveFd.append("collection", col);
+
+            await axios.post(`${API}/save`, saveFd);
             successCount++;
+
+            // 3. Update Preview with last file details
+            document.getElementById("upSerial").value = d.serial || "";
+            document.getElementById("upModel").value = d.model || "";
+            document.getElementById("upCal").value = d.cal || "";
+            document.getElementById("upExp").value = d.exp || "";
+            document.getElementById("upCert").value = d.cert || "";
+            document.getElementById("upLot").value = d.lot || "";
+            document.getElementById("upCollection").value = col;
+
+            const url = URL.createObjectURL(file);
+            document.getElementById(
+              "pdfPreviewFrame"
+            ).innerHTML = `<iframe src="${url}" class="w-full h-full rounded border-none"></iframe>`;
+            updatePreview();
+
+            // Wait 2s to be safe on quota
+            await new Promise((r) => setTimeout(r, 2000));
           } catch (e) {
             console.error(file.name, e);
             failCount++;
-            // If we hit 429, wait longer
             if (e.response && e.response.status === 429) {
-              await new Promise((r) => setTimeout(r, 10000)); // Wait 10s if rate limited
+              await new Promise((r) => setTimeout(r, 10000));
             }
           }
         }
 
         document.getElementById("loading").classList.add("hidden");
         alert(
-          `Batch Complete!\nSuccess: ${successCount}\nFailed: ${failCount}`
+          `Batch Complete!\nSuccessfully Saved: ${successCount}\nFailed: ${failCount}`
         );
+        // Clear file input to allow re-selection
+        document.getElementById("fileInput").value = "";
       }
 
       function updatePreview() {
@@ -575,45 +620,34 @@
         document.getElementById("nfcPreview").innerText = nfc;
       }
 
-      async function saveUpload() {
-        const fd = new FormData();
-        if (currentFile) fd.append("file", currentFile);
-        else {
-          alert("Please select a file (required for certificate storage).");
+      // Manual Save (Triggered by button)
+      async function saveManual() {
+        // Check required fields
+        const serial = document.getElementById("upSerial").value;
+        if (!serial) {
+          alert("Serial Number is required");
           return;
         }
 
-        fd.append("serial", document.getElementById("upSerial").value);
-        fd.append("model", document.getElementById("upModel").value);
-        fd.append("cal", document.getElementById("upCal").value);
-        fd.append("exp", document.getElementById("upExp").value);
-        fd.append("cert", document.getElementById("upCert").value);
-        fd.append("lot", document.getElementById("upLot").value);
+        // Reuse the batch logic but for current form data
+        // We need a file if saving to cert storage
+        // If user just typed manually without a file, we warn them
+        // Or we could support saving without file, but backend requires it.
+        // Let's assume manual entry usually accompanies a file upload OR user selected file above.
 
-        // Default collection if manual
-        const col =
-          document.getElementById("upCollection").value ||
-          (isServiceUpload ? "GD_SERVICE" : "GD");
-        fd.append("collection", col);
-
-        document.getElementById("loading").classList.remove("hidden");
-        try {
-          await axios.post(`${API}/save`, fd);
-          alert("Saved Successfully!");
-          resetUpload();
-          switchTab("dashboard");
-          loadCollection(col);
-        } catch (e) {
-          alert("Save Failed");
-        } finally {
-          document.getElementById("loading").classList.add("hidden");
+        const files = document.getElementById("fileInput").files;
+        if (files.length > 0) {
+          // If files exist, run the batch logic
+          handleFileSelect();
+        } else {
+          alert("Please select a PDF file to attach to this record.");
         }
       }
 
       function resetUpload() {
         document.getElementById("fileInput").value = "";
         document.getElementById("fileNameDisplay").innerText =
-          "Click to Select PDF";
+          "Click to Select PDF(s) - Supports Batch Upload";
         document.getElementById("pdfPreviewFrame").innerHTML =
           "No PDF Selected";
         document
