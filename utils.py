@@ -133,7 +133,7 @@ def extract_with_gemini(file_path, manual_hint=None):
 
         # 3. Use Stable Model
         # gemini-1.5-flash-latest handles images/pdfs well
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        model = genai.GenerativeModel(model_name="gemini-flash-latest")
 
         hint_text = ""
         if manual_hint:
