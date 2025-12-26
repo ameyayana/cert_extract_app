@@ -10,6 +10,16 @@
       rel="stylesheet"
     />
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+      .nfc-box {
+        font-family: monospace;
+        background: #f3f4f6;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px dashed #ccc;
+        font-size: 0.85rem;
+      }
+    </style>
   </head>
   <body class="bg-gray-50 h-screen flex flex-col">
     <header class="bg-white shadow-sm z-20">
@@ -43,7 +53,7 @@
             id="btn-upload"
             class="px-4 py-2 font-medium text-gray-500 hover:text-blue-600 transition"
           >
-            Upload New
+            Add / Upload
           </button>
         </div>
       </div>
@@ -113,41 +123,39 @@
 
       <div
         id="tab-upload"
-        class="hidden h-full flex justify-center items-start pt-10"
+        class="hidden h-full flex justify-center items-start pt-5 overflow-y-auto"
       >
-        <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-2xl">
-          <div id="step1" class="text-center">
-            <div class="flex justify-center mb-6">
-              <div class="bg-gray-100 p-1 rounded-lg flex">
-                <button
-                  onclick="setUploadType(false)"
-                  id="type-rental"
-                  class="px-6 py-2 rounded-md text-sm font-bold bg-white text-gray-800 shadow-sm transition"
-                >
-                  📋 Rental
-                </button>
-                <button
-                  onclick="setUploadType(true)"
-                  id="type-service"
-                  class="px-6 py-2 rounded-md text-sm font-bold text-gray-500 hover:text-gray-800 transition"
-                >
-                  🔧 Service
-                </button>
-              </div>
+        <div
+          class="bg-white p-8 rounded-xl shadow-lg w-full max-w-4xl flex gap-6"
+        >
+          <div class="flex-1">
+            <h3 class="text-xl font-bold mb-4 text-gray-800">New Entry</h3>
+
+            <div class="flex mb-4">
+              <button
+                onclick="setUploadType(false)"
+                id="type-rental"
+                class="flex-1 py-2 rounded-l-md text-sm font-bold bg-blue-600 text-white transition"
+              >
+                📋 Rental
+              </button>
+              <button
+                onclick="setUploadType(true)"
+                id="type-service"
+                class="flex-1 py-2 rounded-r-md text-sm font-bold bg-gray-100 text-gray-500 hover:text-gray-800 transition"
+              >
+                🔧 Service
+              </button>
             </div>
 
             <div
-              class="border-2 border-dashed border-gray-300 rounded-xl p-12 hover:bg-gray-50 cursor-pointer transition"
+              id="dropZone"
+              class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 cursor-pointer transition mb-4"
               onclick="document.getElementById('fileInput').click()"
             >
-              <i
-                class="fas fa-cloud-upload-alt text-5xl text-blue-500 mb-4"
-              ></i>
-              <h3 class="text-lg font-semibold text-gray-700">
-                Drop PDF here or Click to Upload
-              </h3>
-              <p class="text-sm text-gray-400 mt-2">
-                AI will auto-detect equipment type
+              <i class="fas fa-file-pdf text-3xl text-gray-400 mb-2"></i>
+              <p class="text-sm text-gray-600" id="fileNameDisplay">
+                Click to Select PDF (Optional for manual)
               </p>
               <input
                 type="file"
@@ -157,93 +165,188 @@
                 onchange="handleFileSelect()"
               />
             </div>
-          </div>
 
-          <div id="step2" class="hidden">
-            <h3 class="text-lg font-bold mb-4 text-gray-800">
-              Verify Extraction
-            </h3>
-
-            <div class="mb-4">
-              <span
-                id="aiBadge"
-                class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded font-bold uppercase"
-                >AI DETECTED</span
-              >
-              <span
-                id="folderBadge"
-                class="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded font-bold"
-              ></span>
-            </div>
-
-            <div class="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label class="text-xs text-gray-500 font-bold"
-                  >Serial Number</label
+            <div class="grid grid-cols-2 gap-3 mb-4">
+              <div class="col-span-2">
+                <label class="text-xs font-bold text-gray-500">Serial No</label
                 ><input
                   id="upSerial"
-                  class="w-full border p-2 rounded bg-gray-50"
+                  class="w-full border p-2 rounded"
+                  oninput="updatePreview()"
                 />
               </div>
-              <div>
-                <label class="text-xs text-gray-500 font-bold">Model</label
+              <div class="col-span-2">
+                <label class="text-xs font-bold text-gray-500">Model</label
                 ><input
                   id="upModel"
-                  class="w-full border p-2 rounded bg-gray-50"
+                  class="w-full border p-2 rounded"
+                  oninput="updatePreview()"
                 />
               </div>
               <div>
-                <label class="text-xs text-gray-500 font-bold">Cal Date</label
+                <label class="text-xs font-bold text-gray-500">Cal Date</label
                 ><input
                   id="upCal"
-                  class="w-full border p-2 rounded bg-gray-50"
+                  class="w-full border p-2 rounded"
+                  placeholder="YYYY-MM-DD"
+                  oninput="updatePreview()"
                 />
               </div>
               <div>
-                <label class="text-xs text-gray-500 font-bold">Exp Date</label
+                <label class="text-xs font-bold text-gray-500">Exp Date</label
                 ><input
                   id="upExp"
-                  class="w-full border p-2 rounded bg-gray-50"
+                  class="w-full border p-2 rounded"
+                  placeholder="YYYY-MM-DD"
+                  oninput="updatePreview()"
                 />
               </div>
               <div>
-                <label class="text-xs text-gray-500 font-bold">Cert No</label
+                <label class="text-xs font-bold text-gray-500">Cert No</label
                 ><input
                   id="upCert"
-                  class="w-full border p-2 rounded bg-gray-50"
+                  class="w-full border p-2 rounded"
+                  oninput="updatePreview()"
                 />
               </div>
               <div>
-                <label class="text-xs text-gray-500 font-bold"
-                  >Lot / Report No</label
+                <label class="text-xs font-bold text-gray-500">Lot No</label
                 ><input
                   id="upLot"
-                  class="w-full border p-2 rounded bg-gray-50"
+                  class="w-full border p-2 rounded"
+                  oninput="updatePreview()"
                 />
               </div>
             </div>
+
             <input type="hidden" id="upCollection" />
-            <div class="flex gap-3">
-              <button
-                onclick="saveUpload()"
-                class="flex-1 bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 shadow-lg"
+            <button
+              onclick="saveUpload()"
+              id="btnSave"
+              class="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 shadow transition"
+            >
+              Save Record
+            </button>
+          </div>
+
+          <div
+            class="w-80 bg-gray-50 p-4 rounded-lg border border-gray-200 flex flex-col gap-4"
+          >
+            <h4 class="font-bold text-gray-600 text-sm">Preview</h4>
+
+            <div
+              id="pdfPreviewFrame"
+              class="h-40 bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs"
+            >
+              No PDF Selected
+            </div>
+
+            <div>
+              <label class="text-xs font-bold text-gray-500 mb-1 block"
+                >NFC Text (Copy this)</label
               >
-                Save to Cloud
-              </button>
-              <button
-                onclick="resetUpload()"
-                class="px-4 py-2 text-gray-500 hover:text-gray-700"
+              <div
+                id="nfcPreview"
+                class="nfc-box break-all select-all cursor-pointer"
+                onclick="copyNfc()"
+                title="Click to Copy"
               >
-                Cancel
-              </button>
+                (Fill details to generate)
+              </div>
+            </div>
+
+            <div>
+              <label class="text-xs font-bold text-gray-500 mb-1 block"
+                >QR Link</label
+              >
+              <div id="qrLinkPreview" class="text-xs text-blue-600 break-all">
+                ...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="detailModal"
+        class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50"
+      >
+        <div
+          class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative"
+        >
+          <button
+            onclick="closeModal('detailModal')"
+            class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+          >
+            <i class="fas fa-times text-xl"></i>
+          </button>
+          <h3 class="text-2xl font-bold text-gray-800 mb-1" id="detSerial">
+            SN-12345
+          </h3>
+          <p class="text-gray-500 text-sm mb-4" id="detModel">Model Name</p>
+
+          <div class="grid grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-lg">
+            <div>
+              <span class="block text-xs font-bold text-gray-400">CAL DATE</span
+              ><span id="detCal" class="font-medium">-</span>
+            </div>
+            <div>
+              <span class="block text-xs font-bold text-gray-400">EXP DATE</span
+              ><span id="detExp" class="font-medium text-red-600">-</span>
+            </div>
+            <div>
+              <span class="block text-xs font-bold text-gray-400">CERT NO</span
+              ><span id="detCert" class="font-medium">-</span>
+            </div>
+            <div>
+              <span class="block text-xs font-bold text-gray-400">LOT NO</span
+              ><span id="detLot" class="font-medium">-</span>
+            </div>
+            <div class="col-span-2">
+              <span class="block text-xs font-bold text-gray-400"
+                >LAST UPDATED</span
+              ><span id="detUpdated" class="font-medium">-</span>
             </div>
           </div>
 
-          <div id="loading" class="hidden text-center py-10">
-            <i class="fas fa-robot fa-spin text-4xl text-purple-600 mb-4"></i>
-            <h3 class="text-lg font-bold text-gray-700">AI is Analyzing...</h3>
-            <p class="text-sm text-gray-500">Extracting data from document</p>
+          <div class="flex gap-2">
+            <a
+              id="btnViewPdf"
+              href="#"
+              target="_blank"
+              class="flex-1 bg-blue-600 text-white py-2 rounded text-center font-bold hover:bg-blue-700"
+              ><i class="fas fa-file-pdf mr-2"></i> View PDF</a
+            >
+            <a
+              id="btnViewQr"
+              href="#"
+              target="_blank"
+              class="flex-1 bg-gray-800 text-white py-2 rounded text-center font-bold hover:bg-gray-900"
+              ><i class="fas fa-qrcode mr-2"></i> QR Image</a
+            >
           </div>
+
+          <div class="mt-4 pt-4 border-t">
+            <label class="text-xs font-bold text-gray-400 block mb-1"
+              >NFC TEXT</label
+            >
+            <div
+              id="detNfc"
+              class="nfc-box select-all cursor-pointer"
+              onclick="copyText('detNfc')"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="loading"
+        class="fixed inset-0 bg-white bg-opacity-90 hidden flex items-center justify-center z-50"
+      >
+        <div class="text-center">
+          <i class="fas fa-robot fa-spin text-5xl text-blue-600 mb-4"></i>
+          <h3 class="text-xl font-bold text-gray-800">AI Processing...</h3>
+          <p class="text-gray-500">Reading PDF & Extracting Data</p>
         </div>
       </div>
     </main>
@@ -251,7 +354,7 @@
     <script>
       const API = "";
       let currentFile = null;
-      let isServiceUpload = false; // Default to Rental
+      let isServiceUpload = false;
 
       function switchTab(tab) {
         document
@@ -270,41 +373,43 @@
             : "px-4 py-2 font-medium text-gray-500 hover:text-blue-600 transition";
       }
 
-      // Toggle Rental/Service Logic
       function setUploadType(isService) {
         isServiceUpload = isService;
-        const rentalBtn = document.getElementById("type-rental");
-        const serviceBtn = document.getElementById("type-service");
-
+        const r = document.getElementById("type-rental");
+        const s = document.getElementById("type-service");
         if (isService) {
-          rentalBtn.className =
-            "px-6 py-2 rounded-md text-sm font-bold text-gray-500 hover:text-gray-800 transition";
-          serviceBtn.className =
-            "px-6 py-2 rounded-md text-sm font-bold bg-purple-600 text-white shadow-sm transition";
+          r.className =
+            "flex-1 py-2 rounded-l-md text-sm font-bold bg-gray-100 text-gray-500 hover:text-gray-800 transition";
+          s.className =
+            "flex-1 py-2 rounded-r-md text-sm font-bold bg-purple-600 text-white transition";
         } else {
-          rentalBtn.className =
-            "px-6 py-2 rounded-md text-sm font-bold bg-white text-gray-800 shadow-sm transition";
-          serviceBtn.className =
-            "px-6 py-2 rounded-md text-sm font-bold text-gray-500 hover:text-gray-800 transition";
+          r.className =
+            "flex-1 py-2 rounded-l-md text-sm font-bold bg-blue-600 text-white transition";
+          s.className =
+            "flex-1 py-2 rounded-r-md text-sm font-bold bg-gray-100 text-gray-500 hover:text-gray-800 transition";
         }
       }
 
       async function init() {
-        const res = await axios.get(`${API}/api/collections`);
-        const nav = document.getElementById("collectionList");
-        nav.innerHTML = res.data.collections
-          .map(
-            (c) =>
-              `<button onclick="loadCollection('${c}')" class="w-full text-left px-3 py-2 rounded text-gray-600 hover:bg-blue-50 hover:text-blue-600 text-sm transition flex items-center">
-                    <i class="fas ${
-                      c.includes("SERVICE")
-                        ? "fa-tools text-purple-400"
-                        : "fa-folder text-yellow-400"
-                    } mr-2"></i> 
-                    ${c.replace("_SERVICE", " (Svc)")}
-                </button>`
-          )
-          .join("");
+        try {
+          const res = await axios.get(`${API}/api/collections`);
+          const nav = document.getElementById("collectionList");
+          nav.innerHTML = res.data.collections
+            .map(
+              (c) =>
+                `<button onclick="loadCollection('${c}')" class="w-full text-left px-3 py-2 rounded text-gray-600 hover:bg-blue-50 hover:text-blue-600 text-sm transition flex items-center">
+                        <i class="fas ${
+                          c.includes("SERVICE")
+                            ? "fa-tools text-purple-400"
+                            : "fa-folder text-yellow-400"
+                        } mr-2"></i> 
+                        ${c.replace("_SERVICE", " (Svc)")}
+                    </button>`
+            )
+            .join("");
+        } catch (e) {
+          console.error(e);
+        }
       }
 
       async function loadCollection(col) {
@@ -347,9 +452,11 @@
         }
 
         tbody.innerHTML = data
-          .map(
-            (item) => `
-                <tr class="hover:bg-gray-50 transition border-b border-gray-100">
+          .map((item) => {
+            // Encode item data safely for onclick
+            const safeItem = JSON.stringify(item).replace(/"/g, "&quot;");
+            return `
+                <tr class="hover:bg-gray-50 transition border-b border-gray-100 cursor-pointer" onclick="showDetails(${safeItem})">
                     <td class="px-6 py-3 font-medium text-gray-900">${
                       item.serial
                     }</td>
@@ -357,41 +464,66 @@
                     <td class="px-6 py-3"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">${
                       item.expiry_date
                     }</span></td>
-                    <td class="px-6 py-3 text-right space-x-3">
+                    <td class="px-6 py-3 text-right space-x-3" onclick="event.stopPropagation()">
                         ${
                           item.pdf_url
-                            ? `<a href="${item.pdf_url}" target="_blank" class="text-blue-500 hover:text-blue-700" title="View PDF"><i class="fas fa-file-pdf"></i></a>`
+                            ? `<a href="${item.pdf_url}" target="_blank" class="text-blue-500 hover:text-blue-700"><i class="fas fa-file-pdf"></i></a>`
                             : ""
                         }
                         ${
                           collectionName
-                            ? `<button onclick="deleteItem('${collectionName}', '${item.id}')" class="text-red-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>`
+                            ? `<button onclick="deleteItem('${collectionName}', '${item.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>`
                             : ""
                         }
                     </td>
                 </tr>
-            `
-          )
+            `;
+          })
           .join("");
       }
 
-      async function deleteItem(col, id) {
-        if (!confirm("Delete this record permanently?")) return;
-        await axios.delete(`${API}/api/collection/${col}/${id}`);
-        loadCollection(col);
+      // --- DETAILS MODAL ---
+      function showDetails(item) {
+        document.getElementById("detSerial").innerText = item.serial;
+        document.getElementById("detModel").innerText = item.model;
+        document.getElementById("detCal").innerText =
+          item.calibration_date || "-";
+        document.getElementById("detExp").innerText = item.expiry_date || "-";
+        document.getElementById("detCert").innerText = item.cert || "-";
+        document.getElementById("detLot").innerText = item.lot || "-";
+        document.getElementById("detUpdated").innerText =
+          item.last_updated || "-";
+        document.getElementById("btnViewPdf").href = item.pdf_url || "#";
+        document.getElementById("btnViewQr").href = item.qr_image_url || "#";
+
+        const qrLink =
+          item.qr_link ||
+          `https://qrcertificates-30ddb.web.app/?id=${item.serial}`;
+        const nfc = `${qrLink}\nCert:${item.cert || ""}\nSN:${
+          item.serial
+        }\nCal:${item.calibration_date || ""}\nExp:${item.expiry_date || ""}`;
+        document.getElementById("detNfc").innerText = nfc;
+
+        document.getElementById("detailModal").classList.remove("hidden");
       }
 
-      // Upload
+      // --- UPLOAD / ADD LOGIC ---
       async function handleFileSelect() {
         const file = document.getElementById("fileInput").files[0];
         if (!file) return;
         currentFile = file;
-        document.getElementById("step1").classList.add("hidden");
-        document.getElementById("loading").classList.remove("hidden");
+        document.getElementById("fileNameDisplay").innerText = file.name;
 
+        // Preview PDF
+        const url = URL.createObjectURL(file);
+        document.getElementById(
+          "pdfPreviewFrame"
+        ).innerHTML = `<iframe src="${url}" class="w-full h-full rounded border-none"></iframe>`;
+
+        // Auto Extract
+        document.getElementById("loading").classList.remove("hidden");
         const fd = new FormData();
         fd.append("file", file);
-        // ✅ Send the toggle value
         fd.append("is_service", isServiceUpload);
 
         try {
@@ -401,53 +533,97 @@
           document.getElementById("upModel").value = d.model || "";
           document.getElementById("upCal").value = d.cal || "";
           document.getElementById("upExp").value = d.exp || "";
-          document.getElementById("upCert").value = d.cert || "";
+          document.getElementById("upCert").value = d.cert || ""; // Regex fix applied by backend
           document.getElementById("upLot").value = d.lot || "";
           document.getElementById("upCollection").value =
-            res.data.collection || "UNKNOWN";
-
-          // Update Badges
-          document.getElementById("folderBadge").innerText =
-            res.data.collection;
-
-          document.getElementById("loading").classList.add("hidden");
-          document.getElementById("step2").classList.remove("hidden");
+            res.data.collection || "GD";
+          updatePreview();
         } catch (e) {
-          alert("Extraction Error");
-          resetUpload();
+          alert("AI Extraction Failed (Manual Entry Required)");
+        } finally {
+          document.getElementById("loading").classList.add("hidden");
         }
+      }
+
+      function updatePreview() {
+        const s = document.getElementById("upSerial").value || "SN...";
+        const c = document.getElementById("upCert").value || "";
+        const cal = document.getElementById("upCal").value || "";
+        const exp = document.getElementById("upExp").value || "";
+
+        const link = `https://qrcertificates-30ddb.web.app/?id=${encodeURIComponent(
+          s
+        )}`;
+        document.getElementById("qrLinkPreview").innerText = link;
+
+        const nfc = `${link}\nCert:${c}\nSN:${s}\nCal:${cal}\nExp:${exp}`;
+        document.getElementById("nfcPreview").innerText = nfc;
       }
 
       async function saveUpload() {
         const fd = new FormData();
-        fd.append("file", currentFile);
+        if (currentFile) fd.append("file", currentFile);
+        else {
+          alert("Please select a file (required for certificate storage).");
+          return;
+        }
+
         fd.append("serial", document.getElementById("upSerial").value);
         fd.append("model", document.getElementById("upModel").value);
         fd.append("cal", document.getElementById("upCal").value);
         fd.append("exp", document.getElementById("upExp").value);
         fd.append("cert", document.getElementById("upCert").value);
         fd.append("lot", document.getElementById("upLot").value);
-        fd.append("collection", document.getElementById("upCollection").value);
 
+        // Default collection if manual
+        const col =
+          document.getElementById("upCollection").value ||
+          (isServiceUpload ? "GD_SERVICE" : "GD");
+        fd.append("collection", col);
+
+        document.getElementById("loading").classList.remove("hidden");
         try {
           await axios.post(`${API}/save`, fd);
-          alert("Saved!");
+          alert("Saved Successfully!");
           resetUpload();
           switchTab("dashboard");
-          // Refresh list if applicable
-          const col = document.getElementById("upCollection").value;
-          if (col) loadCollection(col);
+          loadCollection(col);
         } catch (e) {
           alert("Save Failed");
+        } finally {
+          document.getElementById("loading").classList.add("hidden");
         }
       }
 
       function resetUpload() {
-        document.getElementById("step2").classList.add("hidden");
-        document.getElementById("loading").classList.add("hidden");
-        document.getElementById("step1").classList.remove("hidden");
         document.getElementById("fileInput").value = "";
+        document.getElementById("fileNameDisplay").innerText =
+          "Click to Select PDF";
+        document.getElementById("pdfPreviewFrame").innerHTML =
+          "No PDF Selected";
+        document
+          .querySelectorAll("#tab-upload input:not([type=hidden])")
+          .forEach((i) => (i.value = ""));
         currentFile = null;
+        updatePreview();
+      }
+
+      function copyNfc() {
+        copyText("nfcPreview");
+      }
+      function copyText(id) {
+        const text = document.getElementById(id).innerText;
+        navigator.clipboard.writeText(text);
+        alert("Copied to clipboard!");
+      }
+      function closeModal(id) {
+        document.getElementById(id).classList.add("hidden");
+      }
+
+      async function deleteItem(col, id) {
+        if (!confirm("Delete this record permanently?")) return;
+        await axios.delete(`${API}/api/collection/${col}/${id}`);
+        loadCollection(col);
       }
 
       init();

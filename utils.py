@@ -118,11 +118,9 @@ def extract_with_gemini(file_path, manual_hint=None):
         return None
 
     try:
-        # 1. Upload File (Native Vision)
         print(f"📤 Uploading {file_path} to Gemini...")
         sample_file = genai.upload_file(path=file_path, display_name="Certificate")
         
-        # 2. Wait for processing
         while sample_file.state.name == "PROCESSING":
             time.sleep(1)
             sample_file = genai.get_file(sample_file.name)
@@ -131,8 +129,7 @@ def extract_with_gemini(file_path, manual_hint=None):
             print("❌ Google failed to process PDF.")
             return None
 
-        # 3. Use Stable Model
-        # gemini-1.5-flash-latest handles images/pdfs well
+        # Use the name found in your list
         model = genai.GenerativeModel(model_name="gemini-flash-latest")
 
         hint_text = ""
@@ -172,11 +169,17 @@ def extract_with_gemini(file_path, manual_hint=None):
 
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     try:
-        # Use AI Directly
         ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
         
         if not ai_data:
             return {"status": "failed", "error": "AI could not extract data"}
+
+        # ✅ FIX 4: Clean Certificate Number (Stop at .SRV)
+        if "cert" in ai_data and ai_data["cert"]:
+            raw_cert = ai_data["cert"]
+            if ".SRV" in raw_cert:
+                # Take everything up to and including .SRV
+                ai_data["cert"] = raw_cert.split(".SRV")[0] + ".SRV"
 
         # Determine Final Type
         base_type = manual_type if manual_type else ai_data.get("type", "UNKNOWN")
