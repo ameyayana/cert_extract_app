@@ -4,8 +4,7 @@ import json
 import base64
 import qrcode
 import time
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from urllib.parse import quote_plus
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
@@ -16,6 +15,12 @@ from firebase_admin import credentials, firestore, storage, initialize_app, _app
 # ==========================================
 QR_DIR = "qrcodes"
 os.makedirs(QR_DIR, exist_ok=True)
+
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+else:
+    print("⚠️ WARNING: GEMINI_API_KEY is missing!")
 
 # ==========================================
 # 2. FIREBASE SETUP
@@ -104,40 +109,38 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         return False
 
 # ==========================================
-# 5. AI EXTRACTION LOGIC (NEW SDK + GEMINI 2.0)
+# 5. AI EXTRACTION (STABLE LIB + VISION)
 # ==========================================
 
 def extract_with_gemini(file_path, manual_hint=None):
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not os.getenv("GEMINI_API_KEY"):
         print("❌ SKIPPING AI: No GEMINI_API_KEY found.")
         return None
 
     try:
-        # Initialize Client
-        client = genai.Client(api_key=api_key)
-        
-        # 1. Upload File
+        # 1. Upload File (Native Vision)
         print(f"📤 Uploading {file_path} to Gemini...")
-        file_upload = client.files.upload(path=file_path)
+        sample_file = genai.upload_file(path=file_path, display_name="Certificate")
         
-        # 2. Wait for Processing
-        print("⏳ Waiting for PDF processing...")
-        while file_upload.state == "PROCESSING":
+        # 2. Wait for processing
+        while sample_file.state.name == "PROCESSING":
             time.sleep(1)
-            file_upload = client.files.get(name=file_upload.name)
-            
-        if file_upload.state == "FAILED":
-            print("❌ PDF Processing Failed on Google Server.")
+            sample_file = genai.get_file(sample_file.name)
+
+        if sample_file.state.name == "FAILED":
+            print("❌ Google failed to process PDF.")
             return None
 
-        # 3. Generate Content
+        # 3. Use Stable Model
+        # gemini-1.5-flash-latest handles images/pdfs well
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest")
+
         hint_text = ""
         if manual_hint:
             hint_text = f"The user says this document is of type: '{manual_hint}'. Use this context."
 
         prompt = f"""
-        Analyze this PDF document and extract technical data. Return ONLY raw JSON.
+        Extract technical data from this certificate PDF. Return ONLY raw JSON.
         
         {hint_text}
         
@@ -153,26 +156,10 @@ def extract_with_gemini(file_path, manual_hint=None):
         If a field is missing, use empty string "".
         """
 
-        # ✅ CHANGED MODEL TO 'gemini-2.0-flash' (Found in your list)
-        response = client.models.generate_content(
-            model='gemini-2.0-flash', 
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_uri(
-                            file_uri=file_upload.uri,
-                            mime_type=file_upload.mime_type
-                        ),
-                        types.Part.from_text(text=prompt)
-                    ]
-                )
-            ]
-        )
-        
-        # 4. Clean Response
+        response = model.generate_content([sample_file, prompt])
         clean_json = response.text.replace("```json", "").replace("```", "").strip()
         print(f"🤖 AI Response: {clean_json}")
+        
         return json.loads(clean_json)
 
     except Exception as e:
@@ -185,7 +172,7 @@ def extract_with_gemini(file_path, manual_hint=None):
 
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     try:
-        # Use AI directly (Native PDF Support)
+        # Use AI Directly
         ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
         
         if not ai_data:
