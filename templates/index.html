@@ -19,7 +19,6 @@
         border: 1px dashed #ccc;
         font-size: 0.85rem;
       }
-      /* Smooth fade for modals */
       .modal-enter {
         opacity: 0;
         transform: scale(0.9);
@@ -74,17 +73,8 @@
         <div
           class="w-64 bg-white rounded-xl shadow-sm p-4 h-full flex flex-col"
         >
-          <div class="mb-4">
-            <input
-              type="text"
-              id="searchBox"
-              placeholder="Search Serial No..."
-              class="w-full border p-2 rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none"
-              onkeyup="if(event.key === 'Enter') performSearch()"
-            />
-          </div>
           <h3 class="text-xs font-bold text-gray-400 uppercase mb-3">
-            Collections
+            Folders
           </h3>
           <div
             id="collectionList"
@@ -95,34 +85,73 @@
         <div
           class="flex-1 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden"
         >
-          <div
-            class="p-4 border-b flex justify-between items-center bg-gray-50"
-          >
-            <h2 id="tableTitle" class="font-bold text-gray-700">
-              Select a Collection
-            </h2>
-            <span
-              id="countBadge"
-              class="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full"
-              >0 items</span
-            >
+          <div class="p-4 border-b bg-gray-50">
+            <div class="flex justify-between items-center mb-4">
+              <h2 id="tableTitle" class="text-lg font-bold text-gray-700">
+                Select a Collection
+              </h2>
+              <span
+                id="countBadge"
+                class="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full"
+                >0 items</span
+              >
+            </div>
+
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <i
+                  class="fas fa-search absolute left-3 top-3 text-gray-400"
+                ></i>
+                <input
+                  type="text"
+                  id="searchBox"
+                  placeholder="Search..."
+                  class="w-full border pl-10 p-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  oninput="applyFilters()"
+                />
+              </div>
+              <select
+                id="filterField"
+                class="border p-2 rounded-lg text-sm bg-white text-gray-700 outline-none"
+                onchange="applyFilters()"
+              >
+                <option value="all">All Fields</option>
+                <option value="serial">Serial No</option>
+                <option value="model">Model</option>
+                <option value="cert">Cert No</option>
+                <option value="lot">Lot No</option>
+              </select>
+              <select
+                id="sortOrder"
+                class="border p-2 rounded-lg text-sm bg-white text-gray-700 outline-none"
+                onchange="applyFilters()"
+              >
+                <option value="updated_desc">🕒 Recent Updates</option>
+                <option value="updated_asc">🕒 Oldest Updates</option>
+                <option value="exp_asc">📅 Expiring Soon</option>
+                <option value="exp_desc">📅 Expiring Later</option>
+                <option value="serial_asc">🔤 Serial (A-Z)</option>
+              </select>
+            </div>
           </div>
+
           <div class="flex-1 overflow-auto">
             <table class="w-full text-left">
               <thead
-                class="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0"
+                class="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0 z-10"
               >
                 <tr>
                   <th class="px-6 py-3">Serial No</th>
                   <th class="px-6 py-3">Model</th>
                   <th class="px-6 py-3">Expiry</th>
+                  <th class="px-6 py-3">Updated</th>
                   <th class="px-6 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody id="tableBody" class="divide-y divide-gray-100 text-sm">
                 <tr>
-                  <td colspan="4" class="p-10 text-center text-gray-400">
-                    Select a folder or search to view data
+                  <td colspan="5" class="p-10 text-center text-gray-400">
+                    Select a folder to view data
                   </td>
                 </tr>
               </tbody>
@@ -136,8 +165,16 @@
         class="hidden h-full flex justify-center items-start pt-5 overflow-y-auto"
       >
         <div
-          class="bg-white p-8 rounded-xl shadow-lg w-full max-w-4xl flex gap-6"
+          class="bg-white p-8 rounded-xl shadow-lg w-full max-w-4xl flex gap-6 relative"
         >
+          <button
+            id="btnReviewBatch"
+            onclick="openBatchReview()"
+            class="hidden absolute top-8 right-8 bg-purple-600 text-white px-4 py-2 rounded shadow-lg hover:bg-purple-700 z-10"
+          >
+            <i class="fas fa-list-check mr-2"></i> Review Batch Results
+          </button>
+
           <div class="flex-1">
             <div class="flex justify-between items-center mb-4">
               <h3 class="text-xl font-bold text-gray-800">New Entry</h3>
@@ -148,7 +185,6 @@
                 Clear Form
               </button>
             </div>
-
             <div class="flex mb-4">
               <button
                 onclick="setUploadType(false)"
@@ -162,10 +198,9 @@
                 id="type-service"
                 class="flex-1 py-2 rounded-r-md text-sm font-bold bg-gray-100 text-gray-500 hover:text-gray-800 transition"
               >
-                🔧 Service
+                🔧 Service (Not CHSB asset)
               </button>
             </div>
-
             <div
               id="dropZone"
               class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 cursor-pointer transition mb-4"
@@ -184,7 +219,6 @@
                 onchange="handleFileSelect()"
               />
             </div>
-
             <div class="grid grid-cols-2 gap-3 mb-4">
               <div class="col-span-2">
                 <label class="text-xs font-bold text-gray-500">Serial No</label
@@ -237,7 +271,6 @@
                 />
               </div>
             </div>
-
             <input type="hidden" id="upCollection" />
             <button
               onclick="saveManual()"
@@ -247,19 +280,16 @@
               Save Manual Entry
             </button>
           </div>
-
           <div
             class="w-80 bg-gray-50 p-4 rounded-lg border border-gray-200 flex flex-col gap-4"
           >
             <h4 class="font-bold text-gray-600 text-sm">Preview</h4>
-
             <div
               id="pdfPreviewFrame"
               class="h-40 bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs overflow-hidden"
             >
               No PDF Selected
             </div>
-
             <div>
               <label class="text-xs font-bold text-gray-500 mb-1 block"
                 >NFC Text (Copy this)</label
@@ -273,7 +303,6 @@
                 (Fill details to generate)
               </div>
             </div>
-
             <div>
               <label class="text-xs font-bold text-gray-500 mb-1 block"
                 >QR Link</label
@@ -294,7 +323,7 @@
         class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50"
       >
         <div
-          class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative transform transition-all scale-100"
+          class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 relative"
         >
           <button
             onclick="closeModal('detailModal')"
@@ -302,52 +331,72 @@
           >
             <i class="fas fa-times text-xl"></i>
           </button>
-          <h3 class="text-2xl font-bold text-gray-800 mb-1" id="detSerial">
-            SN-12345
-          </h3>
-          <p class="text-gray-500 text-sm mb-4" id="detModel">Model Name</p>
-
-          <div class="grid grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-lg">
+          <h3 class="text-xl font-bold text-gray-800 mb-4">Entry Details</h3>
+          <div class="space-y-3">
             <div>
-              <span class="block text-xs font-bold text-gray-400">CAL DATE</span
-              ><span id="detCal" class="font-medium">-</span>
+              <label class="text-xs font-bold text-gray-400">SERIAL NO</label
+              ><input
+                id="detSerial"
+                class="w-full border p-2 rounded bg-gray-100"
+                readonly
+              />
             </div>
             <div>
-              <span class="block text-xs font-bold text-gray-400">EXP DATE</span
-              ><span id="detExp" class="font-medium text-red-600">-</span>
+              <label class="text-xs font-bold text-gray-400">MODEL</label
+              ><input id="detModel" class="w-full border p-2 rounded" />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-bold text-gray-400">CAL DATE</label
+                ><input id="detCal" class="w-full border p-2 rounded" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-400">EXP DATE</label
+                ><input
+                  id="detExp"
+                  class="w-full border p-2 rounded text-red-600"
+                />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-400">CERT NO</label
+                ><input id="detCert" class="w-full border p-2 rounded" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-400">LOT NO</label
+                ><input id="detLot" class="w-full border p-2 rounded" />
+              </div>
             </div>
             <div>
-              <span class="block text-xs font-bold text-gray-400">CERT NO</span
-              ><span id="detCert" class="font-medium">-</span>
-            </div>
-            <div>
-              <span class="block text-xs font-bold text-gray-400">LOT NO</span
-              ><span id="detLot" class="font-medium">-</span>
-            </div>
-            <div class="col-span-2">
-              <span class="block text-xs font-bold text-gray-400"
-                >LAST UPDATED</span
-              ><span id="detUpdated" class="font-medium">-</span>
+              <label class="text-xs font-bold text-gray-400"
+                >LAST UPDATED</label
+              >
+              <div id="detUpdated" class="text-sm text-gray-600">-</div>
             </div>
           </div>
-
-          <div class="flex gap-2">
+          <div class="flex gap-2 mt-4">
             <a
               id="btnViewPdf"
               href="#"
               target="_blank"
-              class="flex-1 bg-blue-600 text-white py-2 rounded text-center font-bold hover:bg-blue-700 transition"
-              ><i class="fas fa-file-pdf mr-2"></i> View PDF</a
+              class="flex-1 bg-blue-100 text-blue-700 py-2 rounded text-center font-bold hover:bg-blue-200"
+              ><i class="fas fa-file-pdf mr-2"></i> PDF</a
             >
             <a
               id="btnViewQr"
               href="#"
               target="_blank"
-              class="flex-1 bg-gray-800 text-white py-2 rounded text-center font-bold hover:bg-gray-900 transition"
-              ><i class="fas fa-qrcode mr-2"></i> QR Image</a
+              class="flex-1 bg-gray-100 text-gray-700 py-2 rounded text-center font-bold hover:bg-gray-200"
+              ><i class="fas fa-qrcode mr-2"></i> QR</a
             >
           </div>
-
+          <div class="flex gap-2 mt-4">
+            <button
+              onclick="updateEntry()"
+              class="flex-1 bg-green-600 text-white py-2 rounded font-bold hover:bg-green-700"
+            >
+              Save Changes
+            </button>
+          </div>
           <div class="mt-4 pt-4 border-t">
             <label class="text-xs font-bold text-gray-400 block mb-1"
               >NFC TEXT</label
@@ -357,6 +406,52 @@
               class="nfc-box select-all cursor-pointer hover:bg-gray-200 transition"
               onclick="copyText('detNfc')"
             ></div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="batchReviewModal"
+        class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50"
+      >
+        <div
+          class="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 h-3/4 flex flex-col relative"
+        >
+          <button
+            onclick="closeModal('batchReviewModal')"
+            class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+          >
+            <i class="fas fa-times text-xl"></i>
+          </button>
+          <h3 class="text-xl font-bold text-gray-800 mb-4">
+            Batch Results Review
+          </h3>
+          <div class="flex-1 overflow-auto border rounded">
+            <table class="w-full text-left">
+              <thead
+                class="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0"
+              >
+                <tr>
+                  <th class="px-4 py-2">Serial</th>
+                  <th class="px-4 py-2">Model</th>
+                  <th class="px-4 py-2">Cal</th>
+                  <th class="px-4 py-2">Exp</th>
+                  <th class="px-4 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody
+                id="batchReviewBody"
+                class="divide-y divide-gray-100 text-sm"
+              ></tbody>
+            </table>
+          </div>
+          <div class="mt-4 text-right">
+            <button
+              onclick="closeModal('batchReviewModal')"
+              class="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700"
+            >
+              Done
+            </button>
           </div>
         </div>
       </div>
@@ -379,6 +474,10 @@
       const API = "";
       let currentFile = null;
       let isServiceUpload = false;
+
+      let rawData = []; // Store for filtering
+      let currentCollectionName = "";
+      let batchResults = []; // Store batch results
 
       function switchTab(tab) {
         document
@@ -437,47 +536,71 @@
       }
 
       async function loadCollection(col) {
+        currentCollectionName = col;
         document.getElementById("tableTitle").innerText = col.replace(
           "_SERVICE",
           " (Service)"
         );
         document.getElementById(
           "tableBody"
-        ).innerHTML = `<tr><td colspan="4" class="p-10 text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>`;
+        ).innerHTML = `<tr><td colspan="5" class="p-10 text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>`;
         try {
           const res = await axios.get(`${API}/api/collection/${col}`);
-          renderTable(res.data.data, col);
+          rawData = res.data.data;
+          applyFilters();
         } catch (e) {
           console.error(e);
         }
       }
 
-      async function performSearch() {
-        const q = document.getElementById("searchBox").value;
-        if (!q) return;
-        document.getElementById("tableTitle").innerText = `Search: "${q}"`;
-        try {
-          const res = await axios.get(`${API}/api/search?q=${q}`);
-          renderTable(res.data.results, null);
-        } catch (e) {
-          alert("Search failed");
-        }
+      function applyFilters() {
+        const query = document.getElementById("searchBox").value.toLowerCase();
+        const field = document.getElementById("filterField").value;
+        const sort = document.getElementById("sortOrder").value;
+
+        let filtered = rawData.filter((item) => {
+          if (!query) return true;
+          if (field === "all")
+            return Object.values(item).some((val) =>
+              String(val).toLowerCase().includes(query)
+            );
+          return String(item[field] || "")
+            .toLowerCase()
+            .includes(query);
+        });
+
+        filtered.sort((a, b) => {
+          const dateA = new Date(a.last_updated || 0);
+          const dateB = new Date(b.last_updated || 0);
+          const expA = new Date(a.expiry_date || "2099-01-01");
+          const expB = new Date(b.expiry_date || "2099-01-01");
+
+          if (sort === "updated_desc") return dateB - dateA;
+          if (sort === "updated_asc") return dateA - dateB;
+          if (sort === "exp_asc") return expA - expB;
+          if (sort === "exp_desc") return expB - expA;
+          if (sort === "serial_asc") return a.serial.localeCompare(b.serial);
+          return 0;
+        });
+
+        renderTable(filtered);
       }
 
-      function renderTable(data, collectionName) {
+      function renderTable(data) {
         const tbody = document.getElementById("tableBody");
         document.getElementById(
           "countBadge"
         ).innerText = `${data.length} items`;
-
         if (data.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="4" class="p-10 text-center text-gray-400">No records found</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="5" class="p-10 text-center text-gray-400">No records found</td></tr>`;
           return;
         }
-
         tbody.innerHTML = data
           .map((item) => {
             const safeItem = JSON.stringify(item).replace(/"/g, "&quot;");
+            const updated = item.last_updated
+              ? new Date(item.last_updated).toLocaleDateString()
+              : "-";
             return `
                 <tr class="hover:bg-gray-50 transition border-b border-gray-100 cursor-pointer" onclick="showDetails(${safeItem})">
                     <td class="px-6 py-3 font-medium text-gray-900">${
@@ -487,17 +610,16 @@
                     <td class="px-6 py-3"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">${
                       item.expiry_date
                     }</span></td>
+                    <td class="px-6 py-3 text-xs text-gray-500">${updated}</td>
                     <td class="px-6 py-3 text-right space-x-3" onclick="event.stopPropagation()">
                         ${
                           item.pdf_url
                             ? `<a href="${item.pdf_url}" target="_blank" class="text-blue-500 hover:text-blue-700" title="PDF"><i class="fas fa-file-pdf"></i></a>`
                             : ""
                         }
-                        ${
-                          collectionName
-                            ? `<button onclick="deleteItem('${collectionName}', '${item.id}')" class="text-red-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>`
-                            : ""
-                        }
+                        <button onclick="deleteItem('${currentCollectionName}', '${
+              item.id
+            }')" class="text-red-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>
                     </td>
                 </tr>
             `;
@@ -506,15 +628,23 @@
       }
 
       function showDetails(item) {
-        document.getElementById("detSerial").innerText = item.serial;
-        document.getElementById("detModel").innerText = item.model;
-        document.getElementById("detCal").innerText =
-          item.calibration_date || "-";
-        document.getElementById("detExp").innerText = item.expiry_date || "-";
-        document.getElementById("detCert").innerText = item.cert || "-";
-        document.getElementById("detLot").innerText = item.lot || "-";
-        document.getElementById("detUpdated").innerText =
-          item.last_updated || "-";
+        // Check if item has 'collection' prop (from batch review), else use current global
+        const col = item.collection || currentCollectionName;
+        // Store for updating
+        currentCollectionName = col;
+
+        document.getElementById("detSerial").value = item.serial;
+        document.getElementById("detModel").value = item.model;
+        document.getElementById("detCal").value =
+          item.calibration_date || item.cal || "";
+        document.getElementById("detExp").value =
+          item.expiry_date || item.exp || "";
+        document.getElementById("detCert").value = item.cert || "";
+        document.getElementById("detLot").value = item.lot || "";
+        document.getElementById("detUpdated").innerText = item.last_updated
+          ? new Date(item.last_updated).toLocaleString()
+          : "-";
+
         document.getElementById("btnViewPdf").href = item.pdf_url || "#";
         document.getElementById("btnViewQr").href = item.qr_image_url || "#";
 
@@ -523,18 +653,45 @@
           `https://qrcertificates-30ddb.web.app/?id=${item.serial}`;
         const nfc = `${qrLink}\nCert:${item.cert || ""}\nSN:${
           item.serial
-        }\nCal:${item.calibration_date || ""}\nExp:${item.expiry_date || ""}`;
+        }\nCal:${item.calibration_date || item.cal || ""}\nExp:${
+          item.expiry_date || item.exp || ""
+        }`;
         document.getElementById("detNfc").innerText = nfc;
 
         document.getElementById("detailModal").classList.remove("hidden");
       }
 
-      // --- BATCH UPLOAD LOGIC ---
+      async function updateEntry() {
+        if (!currentCollectionName) return;
+        const serial = document.getElementById("detSerial").value;
+
+        const fd = new FormData();
+        fd.append("collection", currentCollectionName);
+        fd.append("serial", serial);
+        fd.append("model", document.getElementById("detModel").value);
+        fd.append("cal", document.getElementById("detCal").value);
+        fd.append("exp", document.getElementById("detExp").value);
+        fd.append("cert", document.getElementById("detCert").value);
+        fd.append("lot", document.getElementById("detLot").value);
+
+        try {
+          await axios.post(`${API}/api/update_record`, fd);
+          alert("Entry Updated!");
+          closeModal("detailModal");
+          loadCollection(currentCollectionName);
+        } catch (e) {
+          alert("Update failed");
+        }
+      }
+
       async function handleFileSelect() {
         const files = document.getElementById("fileInput").files;
         if (!files.length) return;
 
         document.getElementById("loading").classList.remove("hidden");
+        document.getElementById("btnReviewBatch").classList.add("hidden"); // Hide until done
+
+        batchResults = []; // Reset batch list
         let successCount = 0;
         let failCount = 0;
 
@@ -545,7 +702,6 @@
           } of ${files.length}: ${file.name}`;
 
           try {
-            // 1. EXTRACT
             const extractFd = new FormData();
             extractFd.append("file", file);
             extractFd.append("is_service", isServiceUpload);
@@ -557,7 +713,6 @@
             const d = resExt.data.data[0];
             const col = resExt.data.collection;
 
-            // 2. SAVE
             const saveFd = new FormData();
             saveFd.append("file", file);
             saveFd.append("serial", d.serial);
@@ -568,25 +723,25 @@
             saveFd.append("lot", d.lot);
             saveFd.append("collection", col);
 
-            await axios.post(`${API}/save`, saveFd);
+            const saveRes = await axios.post(`${API}/save`, saveFd);
+
             successCount++;
 
-            // 3. Update Preview with last file details
+            // Add to batch results list
+            batchResults.push({
+              ...d,
+              collection: col,
+              pdf_url: saveRes.data.pdf_url, // If backend returns it, else logic needed
+              qr_link: saveRes.data.web_link,
+              qr_image_url: saveRes.data.qr_image_url,
+              last_updated: new Date().toISOString(),
+            });
+
+            // Update UI Preview
             document.getElementById("upSerial").value = d.serial || "";
             document.getElementById("upModel").value = d.model || "";
-            document.getElementById("upCal").value = d.cal || "";
-            document.getElementById("upExp").value = d.exp || "";
-            document.getElementById("upCert").value = d.cert || "";
-            document.getElementById("upLot").value = d.lot || "";
-            document.getElementById("upCollection").value = col;
-
-            const url = URL.createObjectURL(file);
-            document.getElementById(
-              "pdfPreviewFrame"
-            ).innerHTML = `<iframe src="${url}" class="w-full h-full rounded border-none"></iframe>`;
             updatePreview();
 
-            // Wait 2s to be safe on quota
             await new Promise((r) => setTimeout(r, 2000));
           } catch (e) {
             console.error(file.name, e);
@@ -598,11 +753,34 @@
         }
 
         document.getElementById("loading").classList.add("hidden");
-        alert(
-          `Batch Complete!\nSuccessfully Saved: ${successCount}\nFailed: ${failCount}`
-        );
-        // Clear file input to allow re-selection
+        document.getElementById("btnReviewBatch").classList.remove("hidden"); // Show review button
         document.getElementById("fileInput").value = "";
+
+        // Open Review Modal Automatically
+        openBatchReview();
+      }
+
+      function openBatchReview() {
+        const tbody = document.getElementById("batchReviewBody");
+        if (batchResults.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center">No results yet.</td></tr>`;
+        } else {
+          tbody.innerHTML = batchResults
+            .map((item) => {
+              const safeItem = JSON.stringify(item).replace(/"/g, "&quot;");
+              return `
+                    <tr class="hover:bg-gray-50 cursor-pointer border-b" onclick="showDetails(${safeItem})">
+                        <td class="px-4 py-2 font-bold">${item.serial}</td>
+                        <td class="px-4 py-2">${item.model}</td>
+                        <td class="px-4 py-2">${item.cal}</td>
+                        <td class="px-4 py-2">${item.exp}</td>
+                        <td class="px-4 py-2 text-green-600 font-bold"><i class="fas fa-check-circle"></i> Saved</td>
+                    </tr>
+                    `;
+            })
+            .join("");
+        }
+        document.getElementById("batchReviewModal").classList.remove("hidden");
       }
 
       function updatePreview() {
@@ -610,34 +788,22 @@
         const c = document.getElementById("upCert").value || "";
         const cal = document.getElementById("upCal").value || "";
         const exp = document.getElementById("upExp").value || "";
-
         const link = `https://qrcertificates-30ddb.web.app/?id=${encodeURIComponent(
           s
         )}`;
         document.getElementById("qrLinkPreview").innerText = link;
-
         const nfc = `${link}\nCert:${c}\nSN:${s}\nCal:${cal}\nExp:${exp}`;
         document.getElementById("nfcPreview").innerText = nfc;
       }
 
-      // Manual Save (Triggered by button)
       async function saveManual() {
-        // Check required fields
         const serial = document.getElementById("upSerial").value;
         if (!serial) {
           alert("Serial Number is required");
           return;
         }
-
-        // Reuse the batch logic but for current form data
-        // We need a file if saving to cert storage
-        // If user just typed manually without a file, we warn them
-        // Or we could support saving without file, but backend requires it.
-        // Let's assume manual entry usually accompanies a file upload OR user selected file above.
-
         const files = document.getElementById("fileInput").files;
         if (files.length > 0) {
-          // If files exist, run the batch logic
           handleFileSelect();
         } else {
           alert("Please select a PDF file to attach to this record.");
@@ -653,6 +819,7 @@
         document
           .querySelectorAll("#tab-upload input:not([type=hidden])")
           .forEach((i) => (i.value = ""));
+        document.getElementById("btnReviewBatch").classList.add("hidden");
         currentFile = null;
         updatePreview();
       }
