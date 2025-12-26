@@ -4,23 +4,18 @@ import json
 import base64
 import qrcode
 import time
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from urllib.parse import quote_plus
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 
 # ==========================================
-# 1. CONFIGURATION & AI SETUP
+# 1. CONFIGURATION
 # ==========================================
 QR_DIR = "qrcodes"
 os.makedirs(QR_DIR, exist_ok=True)
-
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-else:
-    print("⚠️ WARNING: GEMINI_API_KEY is missing!")
 
 # ==========================================
 # 2. FIREBASE SETUP
@@ -109,34 +104,34 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         return False
 
 # ==========================================
-# 5. AI EXTRACTION LOGIC (NATIVE PDF)
+# 5. AI EXTRACTION LOGIC (NEW SDK + GEMINI 2.0)
 # ==========================================
 
 def extract_with_gemini(file_path, manual_hint=None):
-    if not os.getenv("GEMINI_API_KEY"):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
         print("❌ SKIPPING AI: No GEMINI_API_KEY found.")
         return None
 
     try:
+        # Initialize Client
+        client = genai.Client(api_key=api_key)
+        
         # 1. Upload File
         print(f"📤 Uploading {file_path} to Gemini...")
-        uploaded_file = genai.upload_file(file_path, mime_type="application/pdf")
+        file_upload = client.files.upload(path=file_path)
         
-        # 2. Robust Wait Loop (Crucial for 404/Processing errors)
+        # 2. Wait for Processing
         print("⏳ Waiting for PDF processing...")
-        while uploaded_file.state.name == "PROCESSING":
+        while file_upload.state == "PROCESSING":
             time.sleep(1)
-            uploaded_file = genai.get_file(uploaded_file.name)
+            file_upload = client.files.get(name=file_upload.name)
             
-        if uploaded_file.state.name == "FAILED":
+        if file_upload.state == "FAILED":
             print("❌ PDF Processing Failed on Google Server.")
             return None
 
-        print("✅ PDF Ready. Asking Gemini...")
-
-        # 3. Use Latest Model
-        model = genai.GenerativeModel("gemini-1.5-flash") 
-        
+        # 3. Generate Content
         hint_text = ""
         if manual_hint:
             hint_text = f"The user says this document is of type: '{manual_hint}'. Use this context."
@@ -147,8 +142,8 @@ def extract_with_gemini(file_path, manual_hint=None):
         {hint_text}
         
         Required Fields:
-        - serial (The primary Serial Number / ID. Look for 'S/N', 'Serial No', or similar patterns)
-        - model (Equipment Model Name / Description)
+        - serial (The primary Serial Number / ID)
+        - model (Equipment Model Name)
         - cal (Calibration Date YYYY-MM-DD)
         - exp (Expiry/Next Due Date YYYY-MM-DD)
         - cert (Certificate Number)
@@ -157,18 +152,27 @@ def extract_with_gemini(file_path, manual_hint=None):
 
         If a field is missing, use empty string "".
         """
+
+        # ✅ CHANGED MODEL TO 'gemini-2.0-flash' (Found in your list)
+        response = client.models.generate_content(
+            model='gemini-2.0-flash', 
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_uri(
+                            file_uri=file_upload.uri,
+                            mime_type=file_upload.mime_type
+                        ),
+                        types.Part.from_text(text=prompt)
+                    ]
+                )
+            ]
+        )
         
-        # 4. Generate Content
-        response = model.generate_content([uploaded_file, prompt])
+        # 4. Clean Response
         clean_json = response.text.replace("```json", "").replace("```", "").strip()
         print(f"🤖 AI Response: {clean_json}")
-        
-        # 5. Cleanup (Optional but good practice)
-        try:
-            uploaded_file.delete()
-        except:
-            pass
-
         return json.loads(clean_json)
 
     except Exception as e:
@@ -181,7 +185,7 @@ def extract_with_gemini(file_path, manual_hint=None):
 
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     try:
-        # Go Straight to AI (Best for Scanned Docs & Images)
+        # Use AI directly (Native PDF Support)
         ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
         
         if not ai_data:
