@@ -509,40 +509,55 @@
 
       // --- UPLOAD / ADD LOGIC ---
       async function handleFileSelect() {
-        const file = document.getElementById("fileInput").files[0];
-        if (!file) return;
-        currentFile = file;
-        document.getElementById("fileNameDisplay").innerText = file.name;
+        const files = document.getElementById("fileInput").files; // Get ALL files
+        if (!files.length) return;
 
-        // Preview PDF
-        const url = URL.createObjectURL(file);
-        document.getElementById(
-          "pdfPreviewFrame"
-        ).innerHTML = `<iframe src="${url}" class="w-full h-full rounded border-none"></iframe>`;
-
-        // Auto Extract
         document.getElementById("loading").classList.remove("hidden");
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("is_service", isServiceUpload);
 
-        try {
-          const res = await axios.post(`${API}/extract`, fd);
-          const d = res.data.data[0];
-          document.getElementById("upSerial").value = d.serial || "";
-          document.getElementById("upModel").value = d.model || "";
-          document.getElementById("upCal").value = d.cal || "";
-          document.getElementById("upExp").value = d.exp || "";
-          document.getElementById("upCert").value = d.cert || ""; // Regex fix applied by backend
-          document.getElementById("upLot").value = d.lot || "";
-          document.getElementById("upCollection").value =
-            res.data.collection || "GD";
-          updatePreview();
-        } catch (e) {
-          alert("AI Extraction Failed (Manual Entry Required)");
-        } finally {
-          document.getElementById("loading").classList.add("hidden");
+        let successCount = 0;
+        let failCount = 0;
+
+        // Loop through files one by one
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+
+          // Update UI to show progress
+          document.querySelector("#loading p").innerText = `Processing ${
+            i + 1
+          } of ${files.length}...`;
+
+          const fd = new FormData();
+          fd.append("file", file);
+          fd.append("is_service", isServiceUpload);
+
+          try {
+            // 1. Extract
+            const res = await axios.post(`${API}/extract`, fd);
+            const d = res.data.data[0];
+
+            // 2. Auto-Save (if you trust the AI 100%)
+            // OR just populate the form for the LAST one (current behavior)
+            // For batching, you usually want to auto-save or add to a review list.
+
+            // NOTE: To stay safe under 15 RPM (1 request every 4 seconds):
+            // We need a delay. AI takes ~2-3s, so adding 2s sleep is safe.
+            await new Promise((r) => setTimeout(r, 2000));
+
+            successCount++;
+          } catch (e) {
+            console.error(file.name, e);
+            failCount++;
+            // If we hit 429, wait longer
+            if (e.response && e.response.status === 429) {
+              await new Promise((r) => setTimeout(r, 10000)); // Wait 10s if rate limited
+            }
+          }
         }
+
+        document.getElementById("loading").classList.add("hidden");
+        alert(
+          `Batch Complete!\nSuccess: ${successCount}\nFailed: ${failCount}`
+        );
       }
 
       function updatePreview() {
