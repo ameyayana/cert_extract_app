@@ -110,6 +110,24 @@
                   oninput="applyFilters()"
                 />
               </div>
+
+              <div class="flex border rounded-lg overflow-hidden bg-white">
+                <select
+                  id="filterDateType"
+                  class="bg-gray-50 text-gray-600 text-xs font-bold px-2 py-2 outline-none border-r hover:bg-gray-100 cursor-pointer"
+                  onchange="populateYearFilter(); applyFilters()"
+                >
+                  <option value="expiry">📅 Expiry</option>
+                  <option value="cert">📜 Cert Year</option>
+                </select>
+                <select
+                  id="filterYear"
+                  class="bg-white text-gray-700 text-sm px-2 py-2 outline-none w-24 cursor-pointer"
+                  onchange="applyFilters()"
+                >
+                  <option value="all">All</option>
+                </select>
+              </div>
               <select
                 id="filterField"
                 class="border p-2 rounded-lg text-sm bg-white text-gray-700 outline-none"
@@ -547,26 +565,98 @@
         try {
           const res = await axios.get(`${API}/api/collection/${col}`);
           rawData = res.data.data;
+          
+          // NEW: Populate years immediately when data loads
+          populateYearFilter();
+
           applyFilters();
         } catch (e) {
           console.error(e);
         }
       }
 
+      // NEW: Helper to find years based on selected type
+      function populateYearFilter() {
+        const dateType = document.getElementById("filterDateType").value;
+        const yearSelect = document.getElementById("filterYear");
+        const currentVal = yearSelect.value; 
+
+        yearSelect.innerHTML = '<option value="all">All</option>';
+        
+        const years = new Set();
+
+        rawData.forEach(item => {
+            let y = null;
+            
+            if (dateType === "expiry") {
+                // Logic 1: Get year from Expiry Date (YYYY-MM-DD)
+                const dateStr = item.expiry_date || item.exp;
+                if (dateStr) y = new Date(dateStr).getFullYear();
+            } 
+            else if (dateType === "cert") {
+                // Logic 2: Extract "20XX" from Cert Number (e.g., 12/00845/2025.SRV)
+                const certStr = item.cert || "";
+                const match = certStr.match(/20\d{2}/); 
+                if (match) {
+                    y = parseInt(match[0]);
+                }
+            }
+
+            // Sanity check (years 2000-2099)
+            if (y && !isNaN(y) && y > 2000 && y < 2100) {
+                years.add(y);
+            }
+        });
+
+        // Sort and build options
+        const sortedYears = Array.from(years).sort((a, b) => a - b);
+        sortedYears.forEach(y => {
+            const opt = document.createElement("option");
+            opt.value = y;
+            opt.innerText = y;
+            if (String(y) === currentVal) opt.selected = true;
+            yearSelect.appendChild(opt);
+        });
+      }
+
       function applyFilters() {
         const query = document.getElementById("searchBox").value.toLowerCase();
         const field = document.getElementById("filterField").value;
         const sort = document.getElementById("sortOrder").value;
+        
+        // NEW Inputs
+        const yearFilter = document.getElementById("filterYear").value;
+        const dateType = document.getElementById("filterDateType").value;
 
         let filtered = rawData.filter((item) => {
-          if (!query) return true;
-          if (field === "all")
-            return Object.values(item).some((val) =>
+          // 1. Existing Search
+          let matchesSearch = false;
+          if (!query) matchesSearch = true;
+          else if (field === "all")
+            matchesSearch = Object.values(item).some((val) =>
               String(val).toLowerCase().includes(query)
             );
-          return String(item[field] || "")
-            .toLowerCase()
-            .includes(query);
+          else
+            matchesSearch = String(item[field] || "")
+              .toLowerCase()
+              .includes(query);
+
+          // 2. New Year Logic
+          let matchesYear = true;
+          if (yearFilter !== "all") {
+            if (dateType === "expiry") {
+                // Check Expiry Date
+                const d = item.expiry_date || item.exp;
+                if (!d || !d.startsWith(yearFilter)) matchesYear = false; 
+            } 
+            else if (dateType === "cert") {
+                // Check if Cert Number contains the selected year
+                const c = item.cert || "";
+                if (!c.includes(yearFilter)) matchesYear = false;
+            }
+          }
+
+          return matchesSearch && matchesYear;
         });
 
         filtered.sort((a, b) => {
