@@ -243,14 +243,14 @@
                 id="type-rental"
                 class="flex-1 py-2 rounded-l-md text-sm font-bold bg-blue-600 text-white transition"
               >
-                📋 Rental
+                📋 Asset
               </button>
               <button
                 onclick="setUploadType(true)"
                 id="type-service"
                 class="flex-1 py-2 rounded-r-md text-sm font-bold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition"
               >
-                🔧 Service (Not CHSB asset)
+                🔧 Client
               </button>
             </div>
             
@@ -680,7 +680,7 @@
                             ? "fa-tools text-purple-400"
                             : "fa-folder text-yellow-400"
                         } mr-2"></i> 
-                        ${c.replace("_SERVICE", " (Svc)")}
+                        ${c.replace("_SERVICE", " (Client)")}
                     </button>`
             )
             .join("");
