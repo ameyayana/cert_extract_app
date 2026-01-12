@@ -40,6 +40,10 @@
         transition: opacity 200ms, transform 200ms;
       }
       /* Custom scrollbar for dark mode nicer look */
+      .dark ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
       .dark ::-webkit-scrollbar-track {
         background: #1f2937; 
       }
@@ -429,6 +433,7 @@
               id="btnViewPdf"
               href="#"
               target="_blank"
+              onclick="return validateLink(this)"
               class="flex-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 py-2 rounded text-center font-bold hover:bg-blue-200 dark:hover:bg-blue-800"
               ><i class="fas fa-file-pdf mr-2"></i> PDF</a
             >
@@ -436,6 +441,7 @@
               id="btnViewQr"
               href="#"
               target="_blank"
+              onclick="return validateLink(this)"
               class="flex-1 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 py-2 rounded text-center font-bold hover:bg-gray-200 dark:hover:bg-gray-600"
               ><i class="fas fa-qrcode mr-2"></i> QR</a
             >
@@ -564,7 +570,6 @@
         }
       }
       
-      // Initialize Theme on load
       initTheme();
 
       // --- Drag and Drop Logic ---
@@ -613,8 +618,17 @@
         }
       }
 
-      // Initialize Drag & Drop
       document.addEventListener('DOMContentLoaded', initDragAndDrop);
+
+      // --- NEW: Helper to prevent broken link clicks ---
+      function validateLink(el) {
+        const href = el.getAttribute('href');
+        if (!href || href === '#' || href === 'null') {
+            alert("File/Link not available for this record.");
+            return false; // Prevent navigation
+        }
+        return true; // Allow navigation
+      }
 
       function switchTab(tab) {
         document
@@ -936,8 +950,14 @@
               last_updated: new Date().toISOString(),
             });
 
+            // --- FIX 1: POPULATE MANUAL ENTRY FIELDS ---
             document.getElementById("upSerial").value = d.serial || "";
             document.getElementById("upModel").value = d.model || "";
+            document.getElementById("upCal").value = d.cal || d.calibration_date || "";
+            document.getElementById("upExp").value = d.exp || d.expiry_date || "";
+            document.getElementById("upCert").value = d.cert || "";
+            document.getElementById("upLot").value = d.lot || "";
+            
             updatePreview();
 
             await new Promise((r) => setTimeout(r, 2000));
