@@ -33,6 +33,8 @@ MODEL_PRIORITY = [
     "gemini-pro-latest"
 ]
 
+GEMINI_MODEL = "gemini-flash-latest"
+
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = None
 if GEMINI_KEY:
