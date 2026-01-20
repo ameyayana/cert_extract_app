@@ -166,42 +166,40 @@ def extract_with_gemini(file_path, manual_hint=None):
 # ==========================================
 # 6. MAIN PROCESSOR
 # ==========================================
-
 def process_pdf_text(file_path, is_service=False, manual_type=None):
+    """
+    Orchestrates the extraction and cleanup.
+    Fixed to handle the list of items found in multi-page PDFs.
+    """
     try:
-        ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
+        # Step 1: Get the LIST of items from Gemini
+        items_list = extract_with_gemini(file_path, manual_hint=manual_type)
         
-        if not ai_data:
+        if not items_list:
             return {"status": "failed", "error": "AI could not extract data"}
 
-        # ✅ FIX 4: Clean Certificate Number (Stop at .SRV)
-        if "cert" in ai_data and ai_data["cert"]:
-            raw_cert = ai_data["cert"]
-            if ".SRV" in raw_cert:
-                # Take everything up to and including .SRV
-                ai_data["cert"] = raw_cert.split(".SRV")[0] + ".SRV"
-
-        # Determine Final Type
-        base_type = manual_type if manual_type else ai_data.get("type", "UNKNOWN")
-        type_map = {
-            "GAS DETECTOR": "GD", "GAS_DETECTOR": "GD",
-            "AREA_MONITOR": "AREA MONITOR", "SMOKE_HOOD": "SMOKE HOOD",
-            "RESCUE_KIT": "RESCUE KIT", "HARNESSES" : "HARNESS",
-        }
-        
-        normalized_type = base_type.upper().replace("_", " ")
-        if normalized_type in type_map:
-            normalized_type = type_map[normalized_type]
+        # Step 2: Clean and normalize EVERY item in the list
+        cleaned_data = []
+        for item in items_list: # CRITICAL: This loop handles the 'list' error
+            # Fix Certificate truncation logic for each individual item
+            if item.get("cert") and ".SRV" in item["cert"]:
+                item["cert"] = item["cert"].split(".SRV")[0] + ".SRV"
             
-        final_collection = normalized_type
-        if is_service:
-            final_collection += "_SERVICE"
+            # Use manual type if provided, otherwise trust AI classification
+            final_type = manual_type if manual_type else item.get("type", "UNKNOWN")
+            item["type"] = final_type.upper().replace("_", " ")
+            
+            cleaned_data.append(item)
+
+        # Collection name based on the first item's type (e.g. HARNESS)
+        primary_type = cleaned_data[0]["type"]
+        final_collection = primary_type + ("_SERVICE" if is_service else "")
 
         return {
             "status": "success",
-            "type": normalized_type,
+            "type": primary_type,
             "collection": final_collection,
-            "data": [ai_data] 
+            "data": cleaned_data # Frontend loops through this array
         }
 
     except Exception as e:
