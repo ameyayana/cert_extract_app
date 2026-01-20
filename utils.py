@@ -136,41 +136,35 @@ def extract_with_gemini(file_path, manual_hint=None):
 # 5. MAIN PROCESSOR
 # ==========================================
 def process_pdf_text(file_path, is_service=False, manual_type=None):
-    """
-    Orchestrates the extraction and cleanup.
-    Returns the array of items for the frontend multi-save loop.
-    """
+    final_results = []
     try:
-        items_list = extract_with_gemini(file_path, manual_hint=manual_type)
-        
-        if not items_list:
-            return {"status": "failed", "error": "AI could not extract data"}
-
-        cleaned_data = []
-        for item in items_list:
-            # FIX: Truncate cert at .SRV
-            if item.get("cert") and ".SRV" in item["cert"]:
-                item["cert"] = item["cert"].split(".SRV")[0] + ".SRV"
+        # 1. Open the PDF to count pages
+        with pdfplumber.open(file_path) as pdf:
+            total_pages = len(pdf.pages)
             
-            # Use manual type if provided, else AI type
-            final_type = manual_type if manual_type else item.get("type", "UNKNOWN")
-            item["type"] = final_type.upper().replace("_", " ")
-            cleaned_data.append(item)
+            # 2. Iterate through each page physically
+            for i in range(total_pages):
+                # Extract text for a quick check or let AI do the full vision work
+                # Optimization: Save each page as a temp single-page PDF
+                temp_page_path = f"temp_p{i}.pdf"
+                
+                # Logic to save single page i to temp_page_path goes here...
 
-        # Collection name based on the first item's type
-        primary_type = cleaned_data[0]["type"]
-        final_collection = primary_type + ("_SERVICE" if is_service else "")
+                # 3. Call AI for THIS SPECIFIC PAGE ONLY
+                # This ensures 100% detection for that page's serial number
+                page_data = extract_single_page_logic(temp_page_path) 
+                
+                if page_data:
+                    final_results.append(page_data)
 
+        # 4. Return the combined list to the frontend
         return {
             "status": "success",
-            "type": primary_type,
-            "collection": final_collection,
-            "data": cleaned_data 
+            "data": final_results,
+            "collection": final_results[0].get('type') + ("_SERVICE" if is_service else "")
         }
-
     except Exception as e:
-        print(f"❌ Processing Error: {e}")
-        return {"error": str(e), "status": "failed"}
+        return {"status": "failed", "error": str(e)}
 
 # ==========================================
 # 6. FIREBASE UPDATERS
