@@ -24,7 +24,7 @@ for d in [QR_DIR, SPLIT_DIR]:
         os.makedirs(d, mode=0o777, exist_ok=True)
 
 # Using stable model for technical extraction
-GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL = "gemini-flash-lite-latest"
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
