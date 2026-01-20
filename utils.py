@@ -12,6 +12,7 @@ from firebase_admin import credentials, firestore, storage, initialize_app, _app
 from pypdf import PdfReader, PdfWriter 
 from google import genai
 from google.genai import types
+from urllib.parse import quote_plus
 
 # ==============================================================================
 # 1. CONFIGURATION & DIRECTORIES
