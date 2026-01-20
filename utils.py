@@ -23,21 +23,23 @@ for d in [QR_DIR, SPLIT_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, mode=0o777, exist_ok=True)
 
-# ALL AVAILABLE MODELS PRIORITY LIST
-# We start with Flash models due to higher free-tier quotas.
+# FIXED: Using verified aliases from your ListModels output to prevent 404 errors.
+# We prioritize "Flash" models to preserve your Pro tier quota for complex tasks.
 MODEL_PRIORITY = [
-    "gemini-1.5-flash",
-    "gemini-2.0-flash-exp", 
-    "gemini-3-flash",
-    "gemini-1.5-pro",
-    "gemini-pro-latest"
+    "gemini-flash-latest",       # Points to stable 1.5 Flash
+    "gemini-flash-lite-latest",  # High-efficiency Flash Lite
+    "gemini-2.0-flash",          # New 2.0 version
+    "gemini-pro-latest",         # Points to stable 1.5 Pro
+    "gemini-2.5-pro"             # Latest frontier Pro model
 ]
 
+# Set default model
 GEMINI_MODEL = "gemini-flash-latest"
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = None
 if GEMINI_KEY:
+    # Proper Client initialization for the modern 'google-genai' SDK
     client = genai.Client(api_key=GEMINI_KEY)
 else:
     print("⚠️ WARNING: GEMINI_API_KEY is missing!")
