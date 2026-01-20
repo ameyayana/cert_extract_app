@@ -25,7 +25,7 @@ for d in [QR_DIR, SPLIT_DIR]:
         os.makedirs(d, mode=0o777, exist_ok=True)
 
 # Switching to Gemini Pro for frontier performance
-GEMINI_MODEL = "gemini-1.5-pro" 
+GEMINI_MODEL = "gemini-pro-latest" 
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = None
