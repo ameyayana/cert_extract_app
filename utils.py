@@ -22,7 +22,7 @@ os.makedirs(QR_DIR, exist_ok=True)
 os.makedirs(SPLIT_DIR, exist_ok=True)
 
 # Using the verified model name from your ListModels output
-GEMINI_MODEL = "gemini-1.5-flash" 
+GEMINI_MODEL = "gemini-flash-lite-latest" 
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = None
