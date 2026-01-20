@@ -10,7 +10,8 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 from pypdf import PdfReader, PdfWriter 
-import google.generativeai as genai
+# CRITICAL FIX: Import the new SDK, not the deprecated generativeai
+from google import genai
 from google.genai import types
 
 # ==============================================================================
@@ -24,13 +25,13 @@ for d in [QR_DIR, SPLIT_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, mode=0o777, exist_ok=True)
 
-# Using the high-efficiency Flash Lite model as requested
+# Using the high-efficiency Flash Lite model from your ListModels output
 GEMINI_MODEL = "gemini-flash-lite-latest"
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = None
 if GEMINI_KEY:
-    # Use the new Client object instead of genai.configure()
+    # This now works because we are using the correct 'google.genai' SDK
     client = genai.Client(api_key=GEMINI_KEY)
 else:
     print("⚠️ WARNING: GEMINI_API_KEY is missing from environment variables!")
@@ -66,7 +67,7 @@ def sanitize_filename(name):
 def split_pdf_to_pages(original_path):
     """
     Physically extracts each page from a merged PDF.
-    This is called BEFORE AI extraction to improve speed and accuracy.
+    Ensures each asset has its own unique certificate link.
     """
     page_paths = []
     try:
@@ -118,7 +119,7 @@ def extract_single_page_data(page_info, manual_hint=None):
         - type (Classify EXACTLY as: HARNESS, ABSORBER, GD, EEBD, SCBA, SMOKE HOOD)
         """
         
-        # New SDK model interaction call
+        # Modern SDK interaction using the Client object
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=[
@@ -130,7 +131,7 @@ def extract_single_page_data(page_info, manual_hint=None):
 
         data = json.loads(response.text)
         
-        # Metadata preservation for tracking and local storage
+        # Save metadata for frontend tracking
         data['page'] = page_num
         data['local_split_path'] = file_path 
         return data
@@ -144,10 +145,10 @@ def extract_single_page_data(page_info, manual_hint=None):
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     """
     1. Splits PDF into single pages first.
-    2. Processes all pages in PARALLEL using multithreading.
+    2. Processes all pages in PARALLEL using multithreading for speed.
     """
     try:
-        # Step 1: Split physically first (Faster for AI to read small files)
+        # Step 1: Split physically first (Ensures AI sees only one SN at a time)
         pages = split_pdf_to_pages(file_path)
         if not pages:
             return {"status": "failed", "error": "Document splitting failed"}
@@ -155,15 +156,15 @@ def process_pdf_text(file_path, is_service=False, manual_type=None):
         cleaned_data = []
         # Step 2: Extract in parallel (Threading) for significant speed boost
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_page = {executor.submit(extract_single_page_data, p, manual_type): p for p in pages}
+            future_to_page = {executor.submit(extract_single_page_data, p, manual_hint=manual_type): p for p in pages}
             for future in concurrent.futures.as_completed(future_to_page):
                 result = future.result()
                 if result:
-                    # Specific cleanup for certificate strings
+                    # Clean cert number strings
                     if result.get("cert") and ".SRV" in result["cert"]:
                         result["cert"] = result["cert"].split(".SRV")[0] + ".SRV"
                     
-                    # Individual item routing logic to ensure Absorbers don't go to Harness folder
+                    # Individual item routing logic (e.g. Absorber doesn't go to Harness folder)
                     b_type = result.get("type", "UNKNOWN").upper().replace("_", " ")
                     result["target_collection"] = b_type + ("_SERVICE" if is_service else "")
                     cleaned_data.append(result)
@@ -178,7 +179,7 @@ def process_pdf_text(file_path, is_service=False, manual_type=None):
 # 6. STORAGE & FIREBASE LOGIC
 # ==============================================================================
 def generate_qr_image_only(serial, link):
-    """Generates QR code with SN label at the bottom."""
+    """Generates QR code with Serial Number label."""
     safe_serial = sanitize_filename(serial)
     qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=10, border=4)
     qr.add_data(link); qr.make(fit=True)
@@ -188,6 +189,7 @@ def generate_qr_image_only(serial, link):
     final = Image.new("RGBA", (500, 600), "white")
     final.paste(qr_img, (0, 0))
     draw = ImageDraw.Draw(final)
+    # Positioning text at bottom label
     draw.text((20, 530), f"SN: {serial}", fill="black")
     
     path = os.path.join(QR_DIR, f"qr_{safe_serial}.png")
@@ -195,24 +197,24 @@ def generate_qr_image_only(serial, link):
     return path
 
 def upload_to_firebase_storage(local_path, serial, is_qr=False):
-    """Uploads split cert or QR to storage and makes it public."""
+    """Uploads split cert or QR to Firebase and returns public URL."""
     try:
         _, bucket = get_firebase_db()
         if not bucket: return None
         safe_serial = sanitize_filename(serial)
         ts = int(time.time())
-        # Use timestamp to ensure unique filenames for split PDFs
+        # Use timestamp to ensure each upload is a unique file in storage
         blob_name = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}_{ts}.pdf"
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(local_path)
         blob.make_public()
         return blob.public_url
     except Exception as e:
-        print(f"❌ Firebase Upload Error: {e}")
+        print(f"❌ Storage Error: {e}")
         return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
-    """Creates or updates an individual asset entry in Firestore."""
+    """Saves individual asset data to its specific collection folder in Firestore."""
     try:
         db, _ = get_firebase_db()
         if not db: return False
@@ -226,7 +228,7 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
             "calibration_date": data.get("cal", ""),
             "expiry_date": data.get("exp", ""),
             "lot": data.get("lot", ""),
-            "pdf_url": pdf_url, # Now links to a single-page PDF cert
+            "pdf_url": pdf_url, # Now links specifically to the one-page cert
             "qr_image_url": qr_url,
             "qr_link": qr_link,
             "last_updated": firestore.SERVER_TIMESTAMP,
@@ -235,5 +237,5 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         doc_ref.set(doc_data, merge=True)
         return True
     except Exception as e:
-        print(f"❌ Firestore Sync Error: {e}")
+        print(f"❌ Firestore Error: {e}")
         return False
