@@ -15,7 +15,7 @@ import google.generativeai as genai
 # ==========================================
 # 1. CONFIGURATION & DIRECTORIES
 # ==========================================
-# Using /tmp ensures write permissions on Render's ephemeral filesystem
+# Using /tmp is mandatory for Render write permissions
 QR_DIR = "/tmp/qrcodes"
 SPLIT_DIR = "/tmp/temp_split_certs"
 
@@ -23,7 +23,7 @@ for d in [QR_DIR, SPLIT_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, mode=0o777, exist_ok=True)
 
-# Using stable model for technical extraction
+# Requested model for fast technical extraction
 GEMINI_MODEL = "gemini-flash-lite-latest"
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
@@ -36,6 +36,7 @@ else:
 # 2. FIREBASE SETUP
 # ==========================================
 def get_firebase_db():
+    """Initializes Firebase using Base64 encoded credentials."""
     FIREBASE_BUCKET_NAME = os.getenv("FIREBASE_BUCKET")
     FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
 
@@ -59,8 +60,8 @@ def sanitize_filename(name):
 
 def split_pdf_to_pages(original_path):
     """
-    Physically extracts each page from a merged PDF and saves as individual files.
-    This is called BEFORE AI extraction to improve speed and accuracy.
+    Physically extracts each page from a merged PDF.
+    This ensures each asset has its own unique certificate link.
     """
     page_paths = []
     try:
@@ -84,17 +85,16 @@ def split_pdf_to_pages(original_path):
 # 4. AI EXTRACTION ENGINE (SINGLE-PAGE FOCUS)
 # ==========================================
 def extract_single_page_data(page_info, manual_hint=None):
-    """Sends a pre-split single page to Gemini. Faster and higher focus."""
+    """Sends a single page to Gemini. Faster and higher focus."""
     file_path, page_num = page_info
     try:
-        # Upload single page
         sample_file = genai.upload_file(path=file_path)
         model = genai.GenerativeModel(model_name=GEMINI_MODEL)
         
         prompt = f"""
         Extract technical data from this safety certificate. Return ONLY raw JSON.
         Required fields:
-        - serial (6-digit numeric serial)
+        - serial (Numeric serial found near 'Serial Number')
         - model (Full brand and model name)
         - cal (Inspection Date YYYY-MM-DD)
         - exp (Next Inspection Date YYYY-MM-DD)
@@ -107,9 +107,8 @@ def extract_single_page_data(page_info, manual_hint=None):
         clean_json = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(clean_json)
         
-        # Metadata for tracking
         data['page'] = page_num
-        data['local_split_path'] = file_path 
+        data['local_split_path'] = file_path # CRITICAL for /save endpoint
         return data
     except Exception as e:
         print(f"❌ Gemini Error on Page {page_num}: {e}")
@@ -121,38 +120,33 @@ def extract_single_page_data(page_info, manual_hint=None):
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     """
     1. Splits PDF first.
-    2. Uses ThreadPoolExecutor to process all pages in PARALLEL.
+    2. Processes all pages in PARALLEL.
     """
     try:
-        # Step 1: Split physically first
         pages = split_pdf_to_pages(file_path)
         if not pages:
             return {"status": "failed", "error": "Document splitting failed"}
 
         cleaned_data = []
-        # Step 2: Extract in parallel (Threading) for speed boost
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_page = {executor.submit(extract_single_page_data, p, manual_type): p for p in pages}
             for future in concurrent.futures.as_completed(future_to_page):
                 result = future.result()
                 if result:
-                    # Cleanup cert number string
                     if result.get("cert") and ".SRV" in result["cert"]:
                         result["cert"] = result["cert"].split(".SRV")[0] + ".SRV"
                     
-                    # Individual item routing logic
                     b_type = result.get("type", "UNKNOWN").upper().replace("_", " ")
                     result["target_collection"] = b_type + ("_SERVICE" if is_service else "")
                     cleaned_data.append(result)
 
         return {"status": "success", "data": cleaned_data}
-
     except Exception as e:
         print(f"❌ Processing Error: {e}")
         return {"error": str(e), "status": "failed"}
 
 # ==========================================
-# 6. STORAGE & QR UTILITIES
+# 6. STORAGE & FIREBASE LOGIC
 # ==========================================
 def generate_qr_image_only(serial, link):
     safe_serial = sanitize_filename(serial)
@@ -160,17 +154,16 @@ def generate_qr_image_only(serial, link):
     qr.add_data(link); qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
     qr_img = qr_img.resize((500, 500), Image.Resampling.LANCZOS)
-    
     final = Image.new("RGBA", (500, 600), "white")
     final.paste(qr_img, (0, 0))
     draw = ImageDraw.Draw(final)
     draw.text((20, 530), f"SN: {serial}", fill="black")
-    
     path = os.path.join(QR_DIR, f"qr_{safe_serial}.png")
     final.convert("RGB").save(path)
     return path
 
 def upload_to_firebase_storage(local_path, serial, is_qr=False):
+    """Uploads split cert or QR to storage."""
     try:
         _, bucket = get_firebase_db()
         if not bucket: return None
@@ -182,7 +175,7 @@ def upload_to_firebase_storage(local_path, serial, is_qr=False):
         blob.make_public()
         return blob.public_url
     except Exception as e:
-        print(f"❌ Firebase Upload Error: {e}")
+        print(f"❌ Storage Error: {e}")
         return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
@@ -203,5 +196,5 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         doc_ref.set(doc_data, merge=True)
         return True
     except Exception as e:
-        print(f"❌ Firestore Sync Error: {e}")
+        print(f"❌ Firestore Error: {e}")
         return False
