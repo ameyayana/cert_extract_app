@@ -6,7 +6,7 @@ import qrcode
 import time
 import io
 import concurrent.futures 
-import google.generativeai as genai
+import google.genai as genai
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
