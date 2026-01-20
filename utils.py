@@ -13,6 +13,7 @@ from pypdf import PdfReader, PdfWriter
 # CRITICAL FIX: Import the new SDK, not the deprecated generativeai
 from google import genai
 from google.genai import types
+from urllib.parse import quote_plus
 
 # ==============================================================================
 # 1. CONFIGURATION & DIRECTORIES
@@ -217,9 +218,11 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
     """Saves individual asset data to its specific collection folder in Firestore."""
     try:
         db, _ = get_firebase_db()
-        if not db: return False
         doc_id = sanitize_filename(serial)
-        doc_ref = db.collection(collection_name).document(doc_id)
+        
+        # FIX: Call quote_plus() directly
+        encoded_id = quote_plus(str(serial))
+        qr_link = f"https://qrcertificates-30ddb.web.app/?id={encoded_id}"
         
         doc_data = {
             "serial": serial,
