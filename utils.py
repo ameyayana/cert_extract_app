@@ -10,24 +10,25 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 from pypdf import PdfReader, PdfWriter 
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 # ==========================================
 # 1. CONFIGURATION & DIRECTORIES
 # ==========================================
+# Using /tmp ensures write permissions on Render's ephemeral filesystem
 QR_DIR = "/tmp/qrcodes"
 SPLIT_DIR = "/tmp/temp_split_certs"
-os.makedirs(QR_DIR, exist_ok=True)
-os.makedirs(SPLIT_DIR, exist_ok=True)
 
-# Using the verified model name from your ListModels output
-GEMINI_MODEL = "gemini-flash-lite-latest" 
+for d in [QR_DIR, SPLIT_DIR]:
+    if not os.path.exists(d):
+        os.makedirs(d, mode=0o777, exist_ok=True)
+
+# Using stable model for technical extraction
+GEMINI_MODEL = "gemini-flash-latest"
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-client = None
 if GEMINI_KEY:
-    client = genai.Client(api_key=GEMINI_KEY)
+    genai.configure(api_key=GEMINI_KEY)
 else:
     print("⚠️ WARNING: GEMINI_API_KEY is missing!")
 
@@ -40,7 +41,6 @@ def get_firebase_db():
 
     if not _apps:
         if not FIREBASE_CREDENTIALS:
-            print("❌ FIREBASE_CREDENTIALS missing.")
             return None, None
         try:
             firebase_dict = json.loads(base64.b64decode(FIREBASE_CREDENTIALS).decode("utf-8"))
@@ -52,97 +52,103 @@ def get_firebase_db():
     return firestore.client(), storage.bucket()
 
 # ==========================================
-# 3. PDF PROCESSING UTILITIES
+# 3. PDF UTILITIES (SPLIT BEFORE EXTRACTION)
 # ==========================================
 def sanitize_filename(name):
     return re.sub(r'[\\/:"*?<>|]', "_", str(name)).strip()
 
 def split_pdf_to_pages(original_path):
-    """Physically splits PDF into single-page files before extraction."""
+    """
+    Physically extracts each page from a merged PDF and saves as individual files.
+    This is called BEFORE AI extraction to improve speed and accuracy.
+    """
     page_paths = []
     try:
         reader = PdfReader(original_path)
         for i, page in enumerate(reader.pages):
             output_filename = f"split_page_{i}_{int(time.time())}.pdf"
             output_path = os.path.join(SPLIT_DIR, output_filename)
+            
             writer = PdfWriter()
             writer.add_page(page)
-            with open(output_path, "wb") as f:
-                writer.write(f)
-            page_paths.append((output_path, i + 1))
+            
+            with open(output_path, "wb") as output_file:
+                writer.write(output_file)
+            page_paths.append((output_path, i + 1)) 
         return page_paths
     except Exception as e:
-        print(f"❌ Split Error: {e}")
+        print(f"❌ PDF Splitting Error: {e}")
         return []
 
 # ==========================================
-# 4. NEW AI ENGINE (USING GOOGLE-GENAI SDK)
+# 4. AI EXTRACTION ENGINE (SINGLE-PAGE FOCUS)
 # ==========================================
 def extract_single_page_data(page_info, manual_hint=None):
-    """Processes one page using the modern SDK. Much faster & precise."""
+    """Sends a pre-split single page to Gemini. Faster and higher focus."""
     file_path, page_num = page_info
-    if not client: return None
-
     try:
-        with open(file_path, "rb") as f:
-            pdf_bytes = f.read()
-
-        prompt = """
-        Extract technical safety data from this certificate. Return ONLY raw JSON.
+        # Upload single page
+        sample_file = genai.upload_file(path=file_path)
+        model = genai.GenerativeModel(model_name=GEMINI_MODEL)
+        
+        prompt = f"""
+        Extract technical data from this safety certificate. Return ONLY raw JSON.
         Required fields:
-        - serial (6-digit numeric)
-        - model (Brand and Model)
+        - serial (6-digit numeric serial)
+        - model (Full brand and model name)
         - cal (Inspection Date YYYY-MM-DD)
-        - exp (Expiry Date YYYY-MM-DD)
-        - cert (Cert No, stop after .SRV)
-        - lot (Lot/Report Number)
-        - type (Classify: HARNESS, ABSORBER, GD, EEBD, SCBA, SMOKE HOOD)
+        - exp (Next Inspection Date YYYY-MM-DD)
+        - cert (Certificate No, stop after .SRV)
+        - lot (Report or Lot Number)
+        - type (Classify EXACTLY as: HARNESS, ABSORBER, GD, EEBD, SCBA, SMOKE HOOD)
         """
-
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[
-                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-                prompt
-            ],
-            config=types.GenerateContentConfig(response_mime_type="application/json")
-        )
-
-        data = json.loads(response.text)
+        
+        response = model.generate_content([sample_file, prompt])
+        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_json)
+        
+        # Metadata for tracking
         data['page'] = page_num
-        data['local_split_path'] = file_path
+        data['local_split_path'] = file_path 
         return data
     except Exception as e:
-        print(f"❌ AI Error on Page {page_num}: {e}")
+        print(f"❌ Gemini Error on Page {page_num}: {e}")
         return None
 
 # ==========================================
 # 5. MAIN PROCESSOR (PARALLEL WORKFLOW)
 # ==========================================
 def process_pdf_text(file_path, is_service=False, manual_type=None):
+    """
+    1. Splits PDF first.
+    2. Uses ThreadPoolExecutor to process all pages in PARALLEL.
+    """
     try:
         # Step 1: Split physically first
         pages = split_pdf_to_pages(file_path)
-        if not pages: return {"status": "failed", "error": "Split failed"}
+        if not pages:
+            return {"status": "failed", "error": "Document splitting failed"}
 
-        # Step 2: Extract in parallel (Threading)
         cleaned_data = []
+        # Step 2: Extract in parallel (Threading) for speed boost
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_page = {executor.submit(extract_single_page_data, p, manual_type): p for p in pages}
             for future in concurrent.futures.as_completed(future_to_page):
                 result = future.result()
                 if result:
-                    # Clean cert number
+                    # Cleanup cert number string
                     if result.get("cert") and ".SRV" in result["cert"]:
                         result["cert"] = result["cert"].split(".SRV")[0] + ".SRV"
                     
-                    # Target collection
+                    # Individual item routing logic
                     b_type = result.get("type", "UNKNOWN").upper().replace("_", " ")
                     result["target_collection"] = b_type + ("_SERVICE" if is_service else "")
                     cleaned_data.append(result)
 
         return {"status": "success", "data": cleaned_data}
+
     except Exception as e:
+        print(f"❌ Processing Error: {e}")
         return {"error": str(e), "status": "failed"}
 
 # ==========================================
@@ -167,27 +173,35 @@ def generate_qr_image_only(serial, link):
 def upload_to_firebase_storage(local_path, serial, is_qr=False):
     try:
         _, bucket = get_firebase_db()
+        if not bucket: return None
         safe_serial = sanitize_filename(serial)
-        blob_name = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}_{int(time.time())}.pdf"
+        ts = int(time.time())
+        blob_name = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}_{ts}.pdf"
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(local_path)
         blob.make_public()
         return blob.public_url
     except Exception as e:
-        print(f"❌ Upload Error: {e}"); return None
+        print(f"❌ Firebase Upload Error: {e}")
+        return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
     try:
         db, _ = get_firebase_db()
-        doc_ref = db.collection(collection_name).document(sanitize_filename(serial))
+        if not db: return False
+        doc_id = sanitize_filename(serial)
+        doc_ref = db.collection(collection_name).document(doc_id)
+        
         doc_data = {
             "serial": serial, "cert": data.get("cert", ""), "model": data.get("model", ""),
             "calibration_date": data.get("cal", ""), "expiry_date": data.get("exp", ""),
-            "lot": data.get("lot", ""), "pdf_url": pdf_url, "qr_image_url": qr_url,
-            "qr_link": qr_link, "last_updated": firestore.SERVER_TIMESTAMP,
+            "lot": data.get("lot", ""), "pdf_url": pdf_url, 
+            "qr_image_url": qr_url, "qr_link": qr_link,
+            "last_updated": firestore.SERVER_TIMESTAMP,
             "source_page": data.get("page", 1)
         }
         doc_ref.set(doc_data, merge=True)
         return True
     except Exception as e:
-        print(f"❌ Firestore Error: {e}"); return False
+        print(f"❌ Firestore Sync Error: {e}")
+        return False
