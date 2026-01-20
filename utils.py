@@ -5,248 +5,250 @@ import base64
 import qrcode
 import time
 import io
-import google.generativeai as genai
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 import pdfplumber
+from google import genai 
+from google.genai import types
 
-# ==========================================
-# 1. GLOBAL CONFIGURATION & DIRECTORIES
-# ==========================================
+# ==============================================================================
+# 1. GLOBAL CONFIGURATION & SYSTEM PATHS
+# ==============================================================================
+# Directory for local QR code caching before Firebase upload
 QR_DIR = "qrcodes"
+# Directory for temporary file processing
 TEMP_DIR = "temp_processing"
+
 os.makedirs(QR_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Initialize Google Gemini AI
+# Initialize Google Gemini AI Client with Modern SDK
+client = None
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
+    # Use the new genai.Client for improved performance and JSON enforcement
+    client = genai.Client(api_key=GEMINI_KEY)
+    print("🤖 Gemini AI Engine Initialized Successfully")
 else:
-    print("⚠️ CRITICAL WARNING: GEMINI_API_KEY is missing from environment variables!")
+    print("⚠️ CRITICAL: GEMINI_API_KEY is missing from Environment Variables!")
 
-# ==========================================
+# ==============================================================================
 # 2. FIREBASE CORE INITIALIZATION
-# ==========================================
+# ==============================================================================
 def get_firebase_db():
     """
     Initializes and returns Firestore client and Storage bucket.
-    Uses Base64 encoded credentials for secure environment deployment.
+    Uses Base64 encoded credentials for secure production deployment.
     """
     FIREBASE_BUCKET_NAME = os.getenv("FIREBASE_BUCKET")
     FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
 
     if not _apps:
         if not FIREBASE_CREDENTIALS:
-            print("❌ ERROR: FIREBASE_CREDENTIALS missing.")
+            print("❌ FATAL: FIREBASE_CREDENTIALS environment variable not found.")
             return None, None
         try:
-            # Decode the base64 credential string into JSON
+            # Decode the base64 credential string into valid JSON dictionary
             firebase_dict = json.loads(base64.b64decode(FIREBASE_CREDENTIALS).decode("utf-8"))
             cred = credentials.Certificate(firebase_dict)
             initialize_app(cred, {'storageBucket': FIREBASE_BUCKET_NAME})
-            print("🔥 Firebase Application Initialized Successfully")
+            print("🔥 Firebase Cloud Environment Connected")
         except Exception as e:
-            print(f"❌ Firebase Initialization Error: {e}")
-            return None, None
+            print(f"❌ Firebase Connection Failed: {str(e)}")
+            raise e
             
     return firestore.client(), storage.bucket()
 
-# ==========================================
+# ==============================================================================
 # 3. FILENAME & QR GENERATION UTILITIES
-# ==========================================
+# ==============================================================================
 def sanitize_filename(name):
-    """Removes or replaces characters that are illegal in file paths and Firestore IDs."""
+    """
+    Removes illegal characters to prevent file system and Firestore document ID errors.
+    Target characters: \ / : * ? < > |
+    """
     return re.sub(r'[\\/:"*?<>|]', "_", str(name)).strip()
 
-def generate_qr_with_label(serial, link):
+def generate_qr_image_only(serial, link):
     """
-    Generates a high-resolution QR code with a Serial Number label at the bottom.
-    Optimized for physical tag printing and scanning.
+    Generates a high-resolution QR code (500x600) including a 
+    text label for the Serial Number at the bottom.
     """
     safe_serial = sanitize_filename(serial)
-    qr_size = 500
+    size = 500
     label_height = 100
     
-    # Configure QR Code
+    # Configure QR Generator parameters
     qr = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_H,
         box_size=10,
-        border=4,
+        border=4
     )
     qr.add_data(link)
     qr.make(fit=True)
-
-    # Create QR Image
+    
+    # Render QR matrix to PIL image
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
-    qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+    qr_img = qr_img.resize((size, size), Image.Resampling.LANCZOS)
 
-    # Create Label Background
-    final_img = Image.new("RGBA", (qr_size, qr_size + label_height), "white")
-    final_img.paste(qr_img, (0, 0))
-
-    # Draw Label Text (Serial Number)
-    draw = ImageDraw.Draw(final_img)
+    # Prepare final canvas with space for label
+    final = Image.new("RGBA", (size, size + label_height), "white")
+    final.paste(qr_img, (0, 0))
+    
+    # Draw text label
+    draw = ImageDraw.Draw(final)
     try:
-        # Attempt to load a clean font, fallback to default if not found
-        font = ImageFont.truetype("arial.ttf", 40)
+        # Load font if available in environment, otherwise use default
+        font = ImageFont.load_default() 
     except:
-        font = ImageFont.load_default()
+        font = None
 
     text = f"SN: {serial}"
-    # Center text horizontally
-    bbox = draw.textbbox((0, 0), text, font=font)
-    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(((qr_size - w) / 2, qr_size + (label_height - h) / 2 - 10), text, fill="black", font=font)
+    draw.text((20, size + 20), text, fill="black", font=font)
 
-    # Save to local cache
+    # Save and return path
     path = os.path.join(QR_DIR, f"qr_{safe_serial}.png")
-    final_img.convert("RGB").save(path)
+    final.convert("RGB").save(path)
     return path
 
-# ==========================================
-# 4. AI EXTRACTION LOGIC (MULTI-PAGE AWARE)
-# ==========================================
+# ==============================================================================
+# 4. AI EXTRACTION ENGINE (MULTI-PAGE AWARE)
+# ==============================================================================
 
 
-
-def extract_content_with_ai(file_path, manual_hint=None):
+def extract_with_gemini(file_path, manual_hint=None):
     """
-    Sends the entire PDF to Gemini 1.5 Flash to identify all PPE items.
-    Returns a LIST of items, even if only one is found.
+    Processes the PDF using Gemini 1.5 Flash Vision.
+    Enforces JSON Schema to ensure the backend receives a list of assets.
     """
-    if not os.getenv("GEMINI_API_KEY"):
+    if not client:
         return None
 
     try:
-        print(f"📤 Uploading {file_path} to Gemini for Multi-Page Analysis...")
-        sample_file = genai.upload_file(path=file_path, display_name="Multi-Page Certificate")
-        
-        while sample_file.state.name == "PROCESSING":
-            time.sleep(1)
-            sample_file = genai.get_file(sample_file.name)
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
 
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
-        
+        hint_text = f"The documents provided are: {manual_hint}." if manual_hint else ""
+
+        # Construct specific prompt for Industrial Equipment Safety Certificates
         prompt = f"""
-        Analyze this document and extract technical safety data for EVERY piece of equipment listed. 
-        If the PDF contains a Harness on Page 1 and an Absorber on Page 2, you must return a LIST of two JSON objects.
+        Act as an expert technical data extractor for industrial PPE certificates.
+        {hint_text}
         
-        Required fields for each object:
-        - serial (The serial number, often numeric like '000186')
-        - model (Full brand and equipment description)
-        - cal (Inspection/Calibration date in YYYY-MM-DD)
-        - exp (Next inspection date in YYYY-MM-DD)
-        - cert (The Certificate No., e.g., '1/0016/2026.SRV')
-        - lot (The Report No. or Lot No.)
-        - type (Classify into: ['HARNESS', 'ABSORBER', 'GD', 'EEBD', 'SCBA', 'SMOKE HOOD', 'AREA MONITOR', 'RESCUE KIT'])
-        - page (The page number where this specific item was found)
+        Analyze every page of this PDF. If multiple items (e.g. Page 1 Harness, Page 2 Absorber) are found, 
+        return a JSON LIST containing an object for each unique serial number.
 
-        Hint from user: {manual_hint if manual_hint else "Auto-detect PPE category"}
-        Return ONLY a raw JSON list.
+        JSON SCHEMA PER OBJECT:
+        - [cite_start]serial: Primary Serial Number (e.g., '000186') [cite: 22, 23]
+        - [cite_start]model: Equipment Brand and Model (e.g., 'WORKGARD Body Harness') [cite: 14, 17]
+        - [cite_start]cal: Inspection/Calibration Date in YYYY-MM-DD format [cite: 136]
+        - [cite_start]exp: Next Inspection/Expiry Date in YYYY-MM-DD format [cite: 137]
+        - [cite_start]cert: Full Certificate Number, but STOP and truncate after '.SRV' [cite: 15]
+        - [cite_start]lot: Report Number or Lot Number [cite: 18, 19]
+        - page: The specific page number this item was extracted from.
+        - type: Classify as one of: HARNESS, ABSORBER, GD, EEBD, SCBA, SMOKE HOOD, AREA MONITOR.
+
+        Return ONLY a JSON list. If only one item is found, still return it in a list [{{...}}].
         """
 
-        response = model.generate_content([sample_file, prompt])
-        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+        # Call Gemini with strict JSON enforcement
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                prompt
+            ],
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
         
-        extracted_list = json.loads(clean_json)
+        # Parse result
+        extracted_data = json.loads(response.text)
         
-        # Critical Fix: Ensure the response is always a list for the frontend loop
-        if isinstance(extracted_list, dict):
-            return [extracted_list]
-        return extracted_list
+        # CRITICAL FIX: Ensure return is a list to prevent 'dict' has no attribute 'get' error
+        if isinstance(extracted_data, dict):
+            return [extracted_data]
+        return extracted_data
 
     except Exception as e:
-        print(f"❌ AI Engine Error: {e}")
+        print(f"❌ Gemini Extraction Exception: {str(e)}")
         return None
 
-# ==========================================
-# 5. MAIN PROCESSOR & CLEANER
-# ==========================================
+# ==============================================================================
+# 5. MAIN PROCESSOR & PIPELINE
+# ==============================================================================
 def process_pdf_text(file_path, is_service=False, manual_type=None):
     """
-    Primary processing pipeline. 
-    1. Extracts data from all pages.
-    2. Cleans certificate numbers (stops at .SRV).
-    3. Normalizes types for database collection mapping.
+    Orchestrates the extraction and normalization pipeline.
+    Ensures multi-page documents result in multi-item entries.
     """
     try:
-        items = extract_content_with_ai(file_path, manual_hint=manual_type)
+        # Get raw data list from AI
+        raw_items_list = extract_with_gemini(file_path, manual_hint=manual_type)
         
-        if not items:
-            return {"status": "failed", "error": "AI failed to parse document."}
+        if not raw_items_list:
+            return {"status": "failed", "error": "AI Engine could not process document."}
 
-        cleaned_items = []
-        for item in items:
-            # Clean Certificate String (Truncate extra text after .SRV)
-            if item.get("cert") and ".SRV" in item["cert"]:
-                item["cert"] = item["cert"].split(".SRV")[0] + ".SRV"
+        # Normalization and Cleaning
+        processed_data = []
+        for item in raw_items_list:
+            # Type classification logic
+            base_type = manual_type if manual_type else item.get("type", "GENERAL")
+            normalized_type = base_type.upper().replace("_", " ")
+            item["type"] = normalized_type
+            processed_data.append(item)
 
-            # Normalize data types for specific collection naming
-            raw_type = item.get("type", "GENERAL").upper().replace("_", " ")
-            type_map = {"GAS DETECTOR": "GD", "SMOKE_HOOD": "SMOKE HOOD"}
-            item["type"] = type_map.get(raw_type, raw_type)
-            
-            cleaned_items.append(item)
-
-        # Map the primary collection name based on the first item detected
-        primary_type = cleaned_items[0]["type"]
-        final_collection = primary_type + ("_SERVICE" if is_service else "")
+        # Collection mapping based on first detected asset
+        primary_collection = processed_data[0]["type"]
+        if is_service:
+            primary_collection += "_SERVICE"
 
         return {
             "status": "success",
-            "type": primary_type,
-            "collection": final_collection,
-            "data": cleaned_items  # Array of items for the frontend multi-save loop
+            "type": processed_data[0]["type"],
+            "collection": primary_collection,
+            "data": processed_data # Frontend loops through this array
         }
 
     except Exception as e:
-        print(f"❌ Processor Exception: {e}")
-        return {"status": "failed", "error": str(e)}
+        print(f"❌ Pipeline Failure: {str(e)}")
+        return {"error": str(e), "status": "failed"}
 
-# ==========================================
-# 6. STORAGE & FIRESTORE INTEGRATION
-# ==========================================
-def upload_to_firebase_storage(local_path, serial, is_qr=False):
-    """Uploads files to Firebase Cloud Storage and makes them public."""
+# ==============================================================================
+# 6. FIREBASE UPDATERS
+# ==============================================================================
+def upload_to_firebase_storage(file_path, serial, is_qr=False):
+    """Uploads binary assets to Cloud Storage and generates public access URLs."""
     try:
         _, bucket = get_firebase_db()
         if not bucket: return None
         
         safe_serial = sanitize_filename(serial)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        blob_path = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}.pdf"
         
-        if is_qr:
-            blob_path = f"qr_codes/qr_{safe_serial}.png"
-        else:
-            blob_path = f"certificates/{safe_serial}_{timestamp}.pdf"
-            
         blob = bucket.blob(blob_path)
-        blob.upload_from_filename(local_path)
+        blob.upload_from_filename(file_path)
         blob.make_public()
         
         return blob.public_url
     except Exception as e:
-        print(f"❌ Storage Upload Failed: {e}")
+        print(f"❌ Storage Upload Error: {str(e)}")
         return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
-    """
-    Creates or merges a record in Firestore for a specific Serial Number.
-    """
+    """Atomic write/merge operation for Firestore entries."""
     try:
         db, _ = get_firebase_db()
         if not db: return False
         
-        safe_doc_id = sanitize_filename(serial)
-        doc_ref = db.collection(collection_name).document(safe_doc_id)
+        safe_id = sanitize_filename(serial)
+        doc_ref = db.collection(collection_name).document(safe_id)
         
         payload = {
             "serial": serial,
-            "model": data.get("model", "N/A"),
             "cert": data.get("cert", "N/A"),
+            "model": data.get("model", "N/A"),
             "calibration_date": data.get("cal", ""),
             "expiry_date": data.get("exp", ""),
             "lot": data.get("lot", "N/A"),
@@ -260,5 +262,5 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         doc_ref.set(payload, merge=True)
         return True
     except Exception as e:
-        print(f"❌ Firestore Document Update Failed: {e}")
+        print(f"❌ Firestore Sync Error: {str(e)}")
         return False
