@@ -20,7 +20,7 @@ SPLIT_DIR = "/tmp/temp_split_certs"
 os.makedirs(QR_DIR, exist_ok=True)
 os.makedirs(SPLIT_DIR, exist_ok=True)
 
-GEMINI_MODEL = "gemini-1.5-flash-latest" # Faster than older versions
+GEMINI_MODEL = "gemini-flash-latest" # Faster than older versions
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
