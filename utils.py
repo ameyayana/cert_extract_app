@@ -10,7 +10,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
 from pypdf import PdfReader, PdfWriter 
-import google.generativeai as genai
+import google.genai as genai
 
 # ==========================================
 # 1. CONFIGURATION & DIRECTORIES
