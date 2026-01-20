@@ -16,7 +16,6 @@ from google.genai import types
 # ==============================================================================
 # 1. CONFIGURATION & DIRECTORIES
 # ==============================================================================
-# Using /tmp ensures write permissions on Render's ephemeral filesystem
 QR_DIR = "/tmp/qrcodes"
 SPLIT_DIR = "/tmp/temp_split_certs"
 
@@ -24,13 +23,19 @@ for d in [QR_DIR, SPLIT_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, mode=0o777, exist_ok=True)
 
-# Switching to Gemini Pro for frontier performance
-GEMINI_MODEL = "gemini-pro-latest" 
+# ALL AVAILABLE MODELS PRIORITY LIST
+# We start with Flash models due to higher free-tier quotas.
+MODEL_PRIORITY = [
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-exp", 
+    "gemini-3-flash",
+    "gemini-1.5-pro",
+    "gemini-pro-latest"
+]
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = None
 if GEMINI_KEY:
-    # Proper Client initialization for 'google-genai' library
     client = genai.Client(api_key=GEMINI_KEY)
 else:
     print("⚠️ WARNING: GEMINI_API_KEY is missing!")
@@ -62,7 +67,6 @@ def sanitize_filename(name):
     return re.sub(r'[\\/:"*?<>|]', "_", str(name)).strip()
 
 def split_pdf_to_pages(original_path):
-    """Physically extracts each page from a PDF so each entry has its own file."""
     page_paths = []
     try:
         reader = PdfReader(original_path)
@@ -80,17 +84,23 @@ def split_pdf_to_pages(original_path):
         return []
 
 # ==============================================================================
-# 4. AI EXTRACTION (SINGLE REQUEST FOR MULTIPLE ITEMS)
+# 4. AI EXTRACTION (WITH FALLBACK LOGIC)
 # ==============================================================================
 
-
-
-def process_pdf_text(file_path, is_service=False, manual_type=None):
+def process_pdf_text(file_path, is_service=False, manual_type=None, model_index=0):
     """
-    Sends the entire PDF to Gemini Pro in ONE call to save quota.
-    It identifies every equipment item found across all pages.
+    Tries extraction using MODEL_PRIORITY list. 
+    If a model hits a quota limit (429), it automatically tries the next one.
     """
-    if not client: return {"status": "failed", "error": "AI client not ready"}
+    if not client: 
+        return {"status": "failed", "error": "AI client not ready"}
+    
+    # Check if we have exhausted our local list of models
+    if model_index >= len(MODEL_PRIORITY):
+        return {"status": "failed", "error": "All available Gemini models have exhausted their quota."}
+
+    current_model = MODEL_PRIORITY[model_index]
+    print(f"--- Attempting AI extraction with: {current_model} ---")
 
     try:
         with open(file_path, "rb") as f:
@@ -113,7 +123,7 @@ def process_pdf_text(file_path, is_service=False, manual_type=None):
         """
 
         response = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=current_model,
             contents=[
                 types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
                 prompt
@@ -123,31 +133,35 @@ def process_pdf_text(file_path, is_service=False, manual_type=None):
 
         items = json.loads(response.text)
         
-        # Physically split the PDF so we can link each database record to its specific page
         pages_dict = {p_path: p_num for p_path, p_num in split_pdf_to_pages(file_path)}
 
         cleaned_data = []
         for item in items:
-            # Map the local split file to the correct item based on page number
             item['local_split_path'] = next((path for path, num in pages_dict.items() if num == item.get('page')), file_path)
             
-            # Clean cert string
             if item.get("cert") and ".SRV" in item["cert"]:
                 item["cert"] = item["cert"].split(".SRV")[0] + ".SRV"
             
-            # Collection routing
             b_type = item.get("type", "UNKNOWN").upper().replace("_", " ")
             item["target_collection"] = b_type + ("_SERVICE" if is_service else "")
             
             cleaned_data.append(item)
 
-        return {"status": "success", "data": cleaned_data}
+        return {"status": "success", "data": cleaned_data, "model_used": current_model}
+
     except Exception as e:
-        print(f"❌ AI Extraction Error: {e}")
-        return {"error": str(e), "status": "failed"}
+        error_msg = str(e)
+        
+        # Trigger Fallback if Quota is exhausted (HTTP 429)
+        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            print(f"⚠️ {current_model} quota reached. Trying next model...")
+            return process_pdf_text(file_path, is_service, manual_type, model_index + 1)
+        
+        print(f"❌ AI Extraction Error ({current_model}): {e}")
+        return {"error": error_msg, "status": "failed"}
 
 # ==============================================================================
-# 5. FIREBASE STORAGE & FIRESTORE (FIXED)
+# 5. FIREBASE STORAGE & FIRESTORE
 # ==============================================================================
 def upload_to_firebase_storage(local_path, serial, is_qr=False):
     try:
@@ -162,12 +176,10 @@ def upload_to_firebase_storage(local_path, serial, is_qr=False):
         print(f"❌ Upload Error: {e}"); return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
-    """Corrected Firestore function with proper doc_ref definition."""
     try:
         db, _ = get_firebase_db()
         if not db: return False
         
-        # FIX: Explicitly define doc_ref
         doc_id = sanitize_filename(serial)
         doc_ref = db.collection(collection_name).document(doc_id)
         
