@@ -4,12 +4,11 @@ import json
 import base64
 import qrcode
 import time
-import io
+import google.generativeai as genai
+from urllib.parse import quote_plus
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from firebase_admin import credentials, firestore, storage, initialize_app, _apps
-import pdfplumber
-import google.generativeai as genai  # Reverting to the stable namespace
 
 # ==========================================
 # 1. CONFIGURATION
@@ -32,6 +31,7 @@ def get_firebase_db():
 
     if not _apps:
         if not FIREBASE_CREDENTIALS:
+            print("❌ FIREBASE_CREDENTIALS missing.")
             return None, None
         try:
             firebase_dict = json.loads(base64.b64decode(FIREBASE_CREDENTIALS).decode("utf-8"))
@@ -46,8 +46,7 @@ def get_firebase_db():
 # 3. HELPER FUNCTIONS
 # ==========================================
 def sanitize_filename(name):
-    # Fixed SyntaxWarning by using a raw string r''
-    return re.sub(r'[\\/:"*?<>|]', "_", str(name)).strip()
+    return re.sub(r'[\\/:"*?<>|]', "_", str(name))
 
 def generate_qr_image_only(serial, link):
     safe_serial = sanitize_filename(serial)
@@ -56,7 +55,7 @@ def generate_qr_image_only(serial, link):
     qr.add_data(link)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
-    qr_img = qr_img.resize((size, size), Image.Resampling.LANCZOS)
+    qr_img = qr_img.resize((size, size), Image.Resampling.NEAREST)
 
     label_height = 100
     label = Image.new("RGBA", (size, label_height), "white")
@@ -74,114 +73,20 @@ def generate_qr_image_only(serial, link):
     return path
 
 # ==========================================
-# 4. EXTRACTION ENGINE (MULTI-PAGE READY)
-# ==========================================
-
-
-
-def extract_with_gemini(file_path, manual_hint=None):
-    """
-    Uses the stable google-generativeai library.
-    Processes the PDF and enforces a JSON LIST return format.
-    """
-    try:
-        # Upload the file to Google's temporary storage
-        sample_file = genai.upload_file(path=file_path, display_name="Certificate")
-        
-        # Wait for processing
-        while sample_file.state.name == "PROCESSING":
-            time.sleep(2)
-            sample_file = genai.get_file(sample_file.name)
-
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
-        hint_text = f"Context: This is a '{manual_hint}' document." if manual_hint else ""
-
-        prompt = f"""
-        Extract safety technical data from EVERY page of this PDF.
-        {hint_text}
-        
-        Return a JSON LIST of objects. 
-        If the PDF contains a Harness on Page 1 and an Absorber on Page 2, return a list of 2 objects.
-
-        Fields required per object:
-        - serial (6-digit numeric for WORKGARD or alphanumeric)
-        - model (Full Brand/Model name)
-        - cal (Date of inspection YYYY-MM-DD)
-        - exp (Next inspection/Expiry YYYY-MM-DD)
-        - cert (Certificate ID, truncate after .SRV)
-        - lot (Report or Lot Number)
-        - type (Classify: HARNESS, ABSORBER, GD, EEBD, SCBA, SMOKE HOOD, AREA MONITOR)
-        - page (Which page number was this found on)
-
-        Return ONLY raw JSON.
-        """
-
-        response = model.generate_content([sample_file, prompt])
-        
-        # Clean the AI response text
-        text_response = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text_response)
-        
-        # Ensure we always return a list to the processor
-        if isinstance(data, dict):
-            return [data]
-        return data
-
-    except Exception as e:
-        print(f"❌ Gemini AI Error: {e}")
-        return None
-
-# ==========================================
-# 5. MAIN PROCESSOR
-# ==========================================
-def process_pdf_text(file_path, is_service=False, manual_type=None):
-    final_results = []
-    try:
-        # 1. Open the PDF to count pages
-        with pdfplumber.open(file_path) as pdf:
-            total_pages = len(pdf.pages)
-            
-            # 2. Iterate through each page physically
-            for i in range(total_pages):
-                # Extract text for a quick check or let AI do the full vision work
-                # Optimization: Save each page as a temp single-page PDF
-                temp_page_path = f"temp_p{i}.pdf"
-                
-                # Logic to save single page i to temp_page_path goes here...
-
-                # 3. Call AI for THIS SPECIFIC PAGE ONLY
-                # This ensures 100% detection for that page's serial number
-                page_data = extract_single_page_logic(temp_page_path) 
-                
-                if page_data:
-                    final_results.append(page_data)
-
-        # 4. Return the combined list to the frontend
-        return {
-            "status": "success",
-            "data": final_results,
-            "collection": final_results[0].get('type') + ("_SERVICE" if is_service else "")
-        }
-    except Exception as e:
-        return {"status": "failed", "error": str(e)}
-
-# ==========================================
-# 6. FIREBASE UPDATERS
+# 4. FIREBASE UPLOADERS
 # ==========================================
 def upload_to_firebase_storage(path, serial, is_qr=False):
     try:
         _, bucket = get_firebase_db()
         if not bucket: return None
         safe_serial = sanitize_filename(serial)
-        # Use timestamp to avoid cache issues for PDFs
-        ts = int(time.time())
-        blob_name = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}_{ts}.pdf"
+        blob_name = f"qr_codes/qr_{safe_serial}.png" if is_qr else f"certificates/{safe_serial}.pdf"
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(path)
         blob.make_public()
         return blob.public_url
     except Exception as e:
+        print(f"❌ Upload Error: {e}")
         return None
 
 def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_link):
@@ -190,21 +95,115 @@ def update_firestore_record(collection_name, serial, data, pdf_url, qr_url, qr_l
         if not db: return False
         safe_doc_id = sanitize_filename(serial)
         doc_ref = db.collection(collection_name).document(safe_doc_id)
-        
         doc_data = {
-            "cert": data.get("cert", ""), 
-            "model": data.get("model", ""),
-            "serial": serial, 
-            "calibration_date": data.get("cal", ""),
-            "expiry_date": data.get("exp", ""), 
-            "lot": data.get("lot", ""),
-            "pdf_url": pdf_url, 
-            "qr_image_url": qr_url, 
-            "qr_link": qr_link,
-            "source_page": data.get("page", 1),
+            "cert": data.get("cert", ""), "model": data.get("model", ""),
+            "serial": serial, "calibration_date": data.get("cal", ""),
+            "expiry_date": data.get("exp", ""), "lot": data.get("lot", ""),
+            "pdf_url": pdf_url, "qr_image_url": qr_url, "qr_link": qr_link,
             "last_updated": firestore.SERVER_TIMESTAMP
         }
         doc_ref.set(doc_data, merge=True)
         return True
     except Exception as e:
+        print(f"❌ Firestore Error: {e}")
         return False
+
+# ==========================================
+# 5. AI EXTRACTION (STABLE LIB + VISION)
+# ==========================================
+
+def extract_with_gemini(file_path, manual_hint=None):
+    if not os.getenv("GEMINI_API_KEY"):
+        print("❌ SKIPPING AI: No GEMINI_API_KEY found.")
+        return None
+
+    try:
+        print(f"📤 Uploading {file_path} to Gemini...")
+        sample_file = genai.upload_file(path=file_path, display_name="Certificate")
+        
+        while sample_file.state.name == "PROCESSING":
+            time.sleep(1)
+            sample_file = genai.get_file(sample_file.name)
+
+        if sample_file.state.name == "FAILED":
+            print("❌ Google failed to process PDF.")
+            return None
+
+        # Use the name found in your list
+        model = genai.GenerativeModel(model_name="gemini-flash-latest")
+
+        hint_text = ""
+        if manual_hint:
+            hint_text = f"The user says this document is of type: '{manual_hint}'. Use this context."
+
+        prompt = f"""
+        Extract technical data from this certificate PDF. Return ONLY raw JSON.
+        
+        {hint_text}
+        
+        Required Fields:
+        - serial (The primary Serial Number / ID)
+        - model (Equipment Model Name)
+        - cal (Calibration Date YYYY-MM-DD)
+        - exp (Expiry/Next Due Date YYYY-MM-DD)
+        - cert (Certificate Number)
+        - lot (Lot Number / Report Number)
+        - type (Classify into one of: ['GD', 'EEBD', 'HARNESS', 'ABSORBER', 'SMOKE HOOD', 'SCBA', 'AREA MONITOR', 'RESCUE KIT'])
+
+        If a field is missing, use empty string "".
+        """
+
+        response = model.generate_content([sample_file, prompt])
+        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+        print(f"🤖 AI Response: {clean_json}")
+        
+        return json.loads(clean_json)
+
+    except Exception as e:
+        print(f"❌ AI Extraction Error: {e}")
+        return None
+
+# ==========================================
+# 6. MAIN PROCESSOR
+# ==========================================
+
+def process_pdf_text(file_path, is_service=False, manual_type=None):
+    try:
+        ai_data = extract_with_gemini(file_path, manual_hint=manual_type)
+        
+        if not ai_data:
+            return {"status": "failed", "error": "AI could not extract data"}
+
+        # ✅ FIX 4: Clean Certificate Number (Stop at .SRV)
+        if "cert" in ai_data and ai_data["cert"]:
+            raw_cert = ai_data["cert"]
+            if ".SRV" in raw_cert:
+                # Take everything up to and including .SRV
+                ai_data["cert"] = raw_cert.split(".SRV")[0] + ".SRV"
+
+        # Determine Final Type
+        base_type = manual_type if manual_type else ai_data.get("type", "UNKNOWN")
+        type_map = {
+            "GAS DETECTOR": "GD", "GAS_DETECTOR": "GD",
+            "AREA_MONITOR": "AREA MONITOR", "SMOKE_HOOD": "SMOKE HOOD",
+            "RESCUE_KIT": "RESCUE KIT", "HARNESSES" : "HARNESS",
+        }
+        
+        normalized_type = base_type.upper().replace("_", " ")
+        if normalized_type in type_map:
+            normalized_type = type_map[normalized_type]
+            
+        final_collection = normalized_type
+        if is_service:
+            final_collection += "_SERVICE"
+
+        return {
+            "status": "success",
+            "type": normalized_type,
+            "collection": final_collection,
+            "data": [ai_data] 
+        }
+
+    except Exception as e:
+        print(f"❌ Processing Error: {e}")
+        return {"error": str(e), "status": "failed"}
