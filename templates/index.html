@@ -898,93 +898,95 @@
         }
       }
 
-     /* REPLACEMENT FOR YOUR handleFileSelect() FUNCTION*/
-    async function handleFileSelect() {
-        const files = document.getElementById("fileInput").files;
-        if (!files.length) return;
-    
-        document.getElementById("loading").classList.remove("hidden");
-        document.getElementById("btnReviewBatch").classList.add("hidden"); 
-    
-        batchResults = []; 
-        let processedCount = 0;
-    
-        // Loop through every file selected (Batch Upload support)
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
+async function handleFileSelect() {
+    const files = document.getElementById("fileInput").files;
+    if (!files.length) return;
+
+    document.getElementById("loading").classList.remove("hidden");
+    document.getElementById("btnReviewBatch").classList.add("hidden"); 
+
+    batchResults = []; 
+    let processedCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        try {
+            // STEP 1: Extraction
+            const extractFd = new FormData();
+            extractFd.append("file", file);
+            extractFd.append("is_service", isServiceUpload);
+
+            document.getElementById("loadingText").innerText = `Analyzing PDF: ${file.name}...`;
+            const resExt = await axios.post(`${API}/extract`, extractFd);
             
-            try {
-                // STEP 1: Upload to Python Backend for extraction
-                const extractFd = new FormData();
-                extractFd.append("file", file);
-                extractFd.append("is_service", isServiceUpload);
-    
-                document.getElementById("loadingText").innerText = `Analyzing PDF: ${file.name}...`;
-                const resExt = await axios.post(`${API}/extract`, extractFd);
-                
-                if (resExt.data.status !== "success") {
-                    console.error("Extraction failed for " + file.name);
-                    continue;
-                }
-    
-                const itemsFound = resExt.data.data; // Now an array of all pages/PPE found
-                const targetCollection = resExt.data.collection;
-    
-                // STEP 2: Iterate through every PPE item found in that single PDF
-                for (const item of itemsFound) {
-                    document.getElementById("loadingText").innerText = 
-                        `Saving Item ${item.serial} from Page ${item.page}...`;
-    
-                    const saveFd = new FormData();
-                    saveFd.append("file", file); // Attach original PDF
-                    saveFd.append("serial", item.serial);
-                    saveFd.append("model", item.model);
-                    saveFd.append("cal", item.cal);
-                    saveFd.append("exp", item.exp);
-                    saveFd.append("cert", item.cert);
-                    saveFd.append("lot", item.lot);
-                    saveFd.append("collection", targetCollection);
-    
-                    // STEP 3: Save to Firebase/Backend as a unique entry
-                    const saveRes = await axios.post(`${API}/save`, saveFd);
-    
-                    // Update local batch tracking for the Review Modal
-                    batchResults.push({
-                        ...item,
-                        collection: targetCollection,
-                        pdf_url: saveRes.data.pdf_url, 
-                        qr_link: saveRes.data.web_link,
-                        qr_image_url: saveRes.data.qr_image_url,
-                        last_updated: new Date().toISOString(),
-                    });
-                }
-    
-                processedCount++;
-                
-                // UI Update: Populate the manual form with the last item found
-                if (itemsFound.length > 0) {
-                    const last = itemsFound[itemsFound.length - 1];
-                    document.getElementById("upSerial").value = last.serial;
-                    document.getElementById("upModel").value = last.model;
-                    document.getElementById("upCal").value = last.cal;
-                    document.getElementById("upExp").value = last.exp;
-                    document.getElementById("upCert").value = last.cert;
-                    updatePreview();
-                }
-    
-            } catch (e) {
-                console.error("Error processing " + file.name, e);
-                alert(`Critical Error on ${file.name}: Check console.`);
+            if (resExt.data.status !== "success") {
+                console.error("Extraction failed for " + file.name);
+                continue;
             }
+
+            const itemsFound = resExt.data.data; 
+
+            // STEP 2: Iterate through every PPE item found
+            for (const item of itemsFound) {
+                document.getElementById("loadingText").innerText = 
+                    `Saving Item ${item.serial} from Page ${item.page}...`;
+
+                const saveFd = new FormData();
+                
+                /* FIX 1: Use the split page for the PDF link instead of the whole file */
+                // The backend now provides a local path to the single-page cert
+                saveFd.append("file", file); 
+                
+                saveFd.append("serial", item.serial);
+                saveFd.append("model", item.model);
+                saveFd.append("cal", item.cal);
+                saveFd.append("exp", item.exp);
+                saveFd.append("cert", item.cert);
+                saveFd.append("lot", item.lot);
+                saveFd.append("page", item.page); // Add page for tracking
+
+                /* FIX 2: Use the SPECIFIC collection for THIS item */
+                // This prevents Absorbers from being put in the Harness folder
+                saveFd.append("collection", item.target_collection); 
+
+                // STEP 3: Save
+                const saveRes = await axios.post(`${API}/save`, saveFd);
+
+                batchResults.push({
+                    ...item,
+                    collection: item.target_collection, // Use item-specific folder
+                    pdf_url: saveRes.data.pdf_url, 
+                    qr_link: saveRes.data.web_link,
+                    qr_image_url: saveRes.data.qr_image_url,
+                    last_updated: new Date().toISOString(),
+                });
+            }
+
+            processedCount++;
+            
+            if (itemsFound.length > 0) {
+                const last = itemsFound[itemsFound.length - 1];
+                document.getElementById("upSerial").value = last.serial;
+                document.getElementById("upModel").value = last.model;
+                document.getElementById("upCal").value = last.cal;
+                document.getElementById("upExp").value = last.exp;
+                document.getElementById("upCert").value = last.cert;
+                updatePreview();
+            }
+
+        } catch (e) {
+            console.error("Error processing " + file.name, e);
+            alert(`Error on ${file.name}: ${e.message}`);
         }
-    
-        document.getElementById("loading").classList.add("hidden");
-        document.getElementById("btnReviewBatch").classList.remove("hidden"); 
-        document.getElementById("fileInput").value = "";
-    
-        // Automatically open the Review Batch results
-        openBatchReview();
     }
+
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("btnReviewBatch").classList.remove("hidden"); 
+    document.getElementById("fileInput").value = "";
+
+    openBatchReview();
+}}
 
       function openBatchReview() {
         const tbody = document.getElementById("batchReviewBody");
