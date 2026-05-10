@@ -11,3 +11,4 @@ pypdf==5.1.0
 pdfplumber==0.11.4
 jinja2
 google-generativeai>=0.8.3
+streamlit==1.37.0
