@@ -12,12 +12,21 @@ from firebase_admin import credentials, firestore, storage, initialize_app, _app
 from pypdf import PdfReader, PdfWriter 
 from google import genai
 from google.genai import types
+<<<<<<< HEAD
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 # 1. LOAD ENVIRONMENT VARIABLES
 load_dotenv()
 
+=======
+from urllib.parse import quote_plus # FIXED: Critical import for URL encoding
+
+# ==============================================================================
+# 1. CONFIGURATION & DIRECTORIES
+# ==============================================================================
+# Using /tmp ensures write permissions on Render
+>>>>>>> 8fa8b41733f2e0bbf3837a576bf6d53ecb6996a8
 QR_DIR = "/tmp/qrcodes"
 SPLIT_DIR = "/tmp/temp_split_certs"
 
@@ -25,6 +34,7 @@ for d in [QR_DIR, SPLIT_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, mode=0o777, exist_ok=True)
 
+<<<<<<< HEAD
 # 2. FIREBASE INITIALIZATION
 def get_firebase_db():
     if not _apps:
@@ -52,6 +62,41 @@ def get_gemini_client():
     if not key:
         return None
     return genai.Client(api_key=key)
+=======
+# PRIORITY LIST: Fallback logic for when specific models hit rate limits
+MODEL_PRIORITY = [
+    "gemini-flash-latest",       # Stable 1.5 Flash
+    "gemini-flash-lite-latest",  # High-efficiency Lite
+    "gemini-2.0-flash",          # New 2.0 Flash
+    "gemini-pro-latest",         # Stable 1.5 Pro
+    "gemini-2.5-pro"             # Frontier Pro
+]
+
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+client = None
+if GEMINI_KEY:
+    # Initializing modern google-genai Client
+    client = genai.Client(api_key=GEMINI_KEY)
+else:
+    print("⚠️ WARNING: GEMINI_API_KEY is missing!")
+
+# ==============================================================================
+# 2. FIREBASE SETUP
+# ==============================================================================
+def get_firebase_db():
+    FIREBASE_BUCKET_NAME = os.getenv("FIREBASE_BUCKET")
+    FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
+
+    if not _apps:
+        try:
+            firebase_dict = json.loads(base64.b64decode(FIREBASE_CREDENTIALS).decode("utf-8"))
+            cred = credentials.Certificate(firebase_dict)
+            initialize_app(cred, {'storageBucket': FIREBASE_BUCKET_NAME})
+        except Exception as e:
+            print(f"❌ Firebase Init Error: {e}")
+            raise e
+    return firestore.client(), storage.bucket()
+>>>>>>> 8fa8b41733f2e0bbf3837a576bf6d53ecb6996a8
 
 # ==============================================================================
 # 3. PDF PROCESSING UTILITIES
