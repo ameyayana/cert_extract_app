@@ -27,7 +27,7 @@ app.add_middleware(
 # --- WEB ---
 @app.get("/", response_class=HTMLResponse)
 async def serve_admin_panel(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 # --- COLLECTIONS ---
 @app.get("/api/collections")
