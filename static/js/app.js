@@ -31,12 +31,14 @@ function toggleTheme() {
 
 function updateThemeIcon(isDark) {
   const icon = document.getElementById('themeIcon');
-  if(isDark) {
-      icon.classList.remove('fa-moon');
-      icon.classList.add('fa-sun');
-  } else {
-      icon.classList.remove('fa-sun');
-      icon.classList.add('fa-moon');
+  if(icon) {
+    if(isDark) {
+        icon.classList.remove('fa-moon');
+        icon.classList.add('fa-sun');
+    } else {
+        icon.classList.remove('fa-sun');
+        icon.classList.add('fa-moon');
+    }
   }
 }
 
@@ -48,20 +50,10 @@ function initDragAndDrop() {
   if (!dropZone) return;
 
   ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-      dropZone.addEventListener(eventName, preventDefaults, false);
-  });
-
-  function preventDefaults(e) {
-      e.preventDefault();
-      e.stopPropagation();
-  }
-
-  ['dragenter', 'dragover'].forEach(eventName => {
-      dropZone.addEventListener(eventName, highlight, false);
-  });
-
-  ['dragleave', 'drop'].forEach(eventName => {
-      dropZone.addEventListener(eventName, unhighlight, false);
+      dropZone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+      }, false);
   });
 
   function highlight(e) {
@@ -74,16 +66,22 @@ function initDragAndDrop() {
       dropZone.classList.add('border-gray-300', 'dark:border-gray-600');
   }
 
-  dropZone.addEventListener('drop', handleDrop, false);
+  ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, highlight, false);
+  });
 
-  function handleDrop(e) {
+  ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, unhighlight, false);
+  });
+
+  dropZone.addEventListener('drop', (e) => {
       const dt = e.dataTransfer;
       const files = dt.files;
       if (files.length > 0) {
           fileInput.files = files;
           handleFileSelect();
       }
-  }
+  }, false);
 }
 
 // --- Navigation Helpers ---
@@ -131,14 +129,13 @@ async function init() {
     const res = await axios.get(`${API}/api/collections`);
     const nav = document.getElementById("collectionList");
     nav.innerHTML = res.data.collections
-      .map((c) =>
-          `<button onclick="loadCollection('${c}')" class="w-full text-left px-3 py-2 rounded text-gray-600 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900 hover:text-blue-600 dark:hover:text-blue-200 text-sm transition flex items-center">
-                  <i class="fas ${c.includes("SERVICE") ? "fa-tools text-purple-400" : "fa-folder text-yellow-400"} mr-2"></i> 
-                  ${c.replace("_SERVICE", " (Client)")}
-              </button>`
-      ).join("");
+      .map(c => `
+        <button onclick="loadCollection('${c}')" class="w-full text-left px-3 py-2 rounded text-gray-600 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900 hover:text-blue-600 dark:hover:text-blue-200 text-sm transition flex items-center">
+            <i class="fas ${c.includes("SERVICE") ? "fa-tools text-purple-400" : "fa-folder text-yellow-400"} mr-2"></i> 
+            ${c.replace("_SERVICE", " (Client)")}
+        </button>`).join("");
   } catch (e) {
-    console.error(e);
+    console.error("Failed to load folders:", e);
   }
 }
 
@@ -160,6 +157,7 @@ function populateYearFilter() {
   const dateType = document.getElementById("filterDateType").value;
   const yearSelect = document.getElementById("filterYear");
   const currentVal = yearSelect.value; 
+
   yearSelect.innerHTML = '<option value="all">All</option>';
   const years = new Set();
 
@@ -255,6 +253,7 @@ function renderTable(data) {
 function showDetails(item) {
   const col = item.collection || currentCollectionName;
   currentCollectionName = col;
+
   document.getElementById("detSerial").value = item.serial;
   document.getElementById("detModel").value = item.model;
   document.getElementById("detCal").value = item.calibration_date || item.cal || "";
@@ -262,11 +261,14 @@ function showDetails(item) {
   document.getElementById("detCert").value = item.cert || "";
   document.getElementById("detLot").value = item.lot || "";
   document.getElementById("detUpdated").innerText = item.last_updated ? new Date(item.last_updated).toLocaleString() : "-";
+
   document.getElementById("btnViewPdf").href = item.pdf_url || "#";
   document.getElementById("btnViewQr").href = item.qr_image_url || "#";
+
   const qrLink = item.qr_link || `https://qrcertificates-30ddb.web.app/?id=${item.serial}`;
   const nfc = `${qrLink}\nCert:${item.cert || ""}\nSN:${item.serial}\nCal:${item.calibration_date || item.cal || ""}\nExp:${item.expiry_date || item.exp || ""}`;
   document.getElementById("detNfc").innerText = nfc;
+
   document.getElementById("detailModal").classList.remove("hidden");
 }
 
@@ -280,6 +282,7 @@ async function updateEntry() {
   fd.append("exp", document.getElementById("detExp").value);
   fd.append("cert", document.getElementById("detCert").value);
   fd.append("lot", document.getElementById("detLot").value);
+
   try {
     await axios.post(`${API}/api/update_record`, fd);
     alert("Entry Updated!");
@@ -293,19 +296,26 @@ async function updateEntry() {
 async function handleFileSelect() {
     const files = document.getElementById("fileInput").files;
     if (!files.length) return;
+
     document.getElementById("loading").classList.remove("hidden");
     document.getElementById("btnReviewBatch").classList.add("hidden"); 
+
     batchResults = []; 
+
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         try {
             const extractFd = new FormData();
             extractFd.append("file", file);
             extractFd.append("is_service", isServiceUpload);
+
             document.getElementById("loadingText").innerText = `Analyzing PDF: ${file.name}...`;
             const resExt = await axios.post(`${API}/extract`, extractFd);
+            
             if (resExt.data.status !== "success") continue;
+
             const itemsFound = resExt.data.data; 
+
             for (const item of itemsFound) {
                 document.getElementById("loadingText").innerText = `Saving Item ${item.serial} from Page ${item.page}...`;
                 const saveFd = new FormData();
@@ -318,7 +328,9 @@ async function handleFileSelect() {
                 saveFd.append("lot", item.lot);
                 saveFd.append("page", item.page); 
                 saveFd.append("collection", item.target_collection); 
+
                 const saveRes = await axios.post(`${API}/save`, saveFd);
+
                 batchResults.push({
                     ...item,
                     collection: item.target_collection,
@@ -328,6 +340,7 @@ async function handleFileSelect() {
                     last_updated: new Date().toISOString(),
                 });
             }
+
             if (itemsFound.length > 0) {
                 const last = itemsFound[itemsFound.length - 1];
                 document.getElementById("upSerial").value = last.serial;
@@ -415,5 +428,5 @@ async function deleteItem(col, id) {
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initDragAndDrop();
-    init();
+    init(); // Loads the folders
 });
