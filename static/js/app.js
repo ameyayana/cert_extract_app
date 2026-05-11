@@ -1,5 +1,5 @@
 // --- Configuration ---
-const API = ""; // If your backend is on a different port, put it here (e.g., "http://localhost:5000")
+const API = "http://127.0.0.1:8000"; // If your backend is on a different port, put it here (e.g., "http://localhost:5000")
 let currentFile = null;
 let isServiceUpload = false;
 let rawData = []; 
