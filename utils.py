@@ -25,16 +25,6 @@ from urllib.parse import quote_plus # FIXED: Critical import for URL encoding
 # ==============================================================================
 # 1. CONFIGURATION & DIRECTORIES
 # ==============================================================================
-# Using /tmp ensures write permissions on Render
->>>>>>> 8fa8b41733f2e0bbf3837a576bf6d53ecb6996a8
-QR_DIR = "/tmp/qrcodes"
-SPLIT_DIR = "/tmp/temp_split_certs"
-
-for d in [QR_DIR, SPLIT_DIR]:
-    if not os.path.exists(d):
-        os.makedirs(d, mode=0o777, exist_ok=True)
-
-<<<<<<< HEAD
 # 2. FIREBASE INITIALIZATION
 def get_firebase_db():
     if not _apps:
