@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CHSB Cert Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+      }
+    </script>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body class="bg-gray-50 dark:bg-gray-900 h-screen flex flex-col transition-colors duration-200">
+    <header class="bg-white dark:bg-gray-800 shadow-sm z-20 transition-colors duration-200">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+        <div class="flex items-center gap-3">
+          <img src="/static/chsb_logo.png" alt="CHSB Logo" class="h-10 w-auto" />
+          <h1 class="text-xl font-bold text-gray-800 dark:text-white tracking-tight">
+            CHSB Cert Extractor
+            <span class="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded ml-2">Admin</span>
+          </h1>
+        </div>
+        <div class="flex gap-4 items-center">
+          <button onclick="switchTab('dashboard')" id="btn-dashboard" class="px-4 py-2 font-medium text-blue-600 border-b-2 border-blue-600 transition dark:text-blue-400 dark:border-blue-400">
+            Dashboard
+          </button>
+          <button onclick="switchTab('upload')" id="btn-upload" class="px-4 py-2 font-medium text-gray-500 hover:text-blue-600 transition dark:text-gray-400 dark:hover:text-blue-400">
+            Add / Upload
+          </button>
+          <button onclick="toggleTheme()" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-yellow-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition ml-2" title="Toggle Dark Mode">
+            <i id="themeIcon" class="fas fa-moon"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl mx-auto w-full p-6 overflow-hidden">
+      <div id="tab-dashboard" class="h-full flex gap-6">
+        <div class="w-64 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 h-full flex flex-col transition-colors duration-200">
+          <h3 class="text-xs font-bold text-gray-400 uppercase mb-3">Folders</h3>
+          <div id="collectionList" class="flex-1 overflow-y-auto space-y-1"></div>
+        </div>
+
+        <div class="flex-1 bg-white dark:bg-gray-800 rounded-xl shadow-sm flex flex-col overflow-hidden transition-colors duration-200">
+          <div class="p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <div class="flex justify-between items-center mb-4">
+              <h2 id="tableTitle" class="text-lg font-bold text-gray-700 dark:text-gray-200">Select a Collection</h2>
+              <span id="countBadge" class="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full">0 items</span>
+            </div>
+
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                <input type="text" id="searchBox" placeholder="Search..." class="w-full border dark:border-gray-600 pl-10 p-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" oninput="applyFilters()" />
+              </div>
+
+              <div class="flex border dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-700">
+                <select id="filterDateType" class="bg-gray-50 dark:bg-gray-600 text-gray-600 dark:text-gray-200 text-xs font-bold px-2 py-2 outline-none border-r dark:border-gray-500 hover:bg-gray-100 dark:hover:bg-gray-500 cursor-pointer" onchange="populateYearFilter(); applyFilters()">
+                  <option value="expiry">📅 Expiry</option>
+                  <option value="cert">📜 Cert Year</option>
+                </select>
+                <select id="filterYear" class="bg-white dark:bg-gray-700 text-gray-700 dark:text-white text-sm px-2 py-2 outline-none w-24 cursor-pointer" onchange="applyFilters()">
+                  <option value="all">All</option>
+                </select>
+              </div>
+              <select id="filterField" class="border dark:border-gray-600 p-2 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-700 dark:text-white outline-none" onchange="applyFilters()">
+                <option value="all">All Fields</option>
+                <option value="serial">Serial No</option>
+                <option value="model">Model</option>
+                <option value="cert">Cert No</option>
+                <option value="lot">Lot No</option>
+              </select>
+              <select id="sortOrder" class="border dark:border-gray-600 p-2 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-700 dark:text-white outline-none" onchange="applyFilters()">
+                <option value="updated_desc">🕒 Recent Updates</option>
+                <option value="updated_asc">🕒 Oldest Updates</option>
+                <option value="exp_asc">📅 Expiring Soon</option>
+                <option value="exp_desc">📅 Expiring Later</option>
+                <option value="serial_asc">🔤 Serial (A-Z)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-auto bg-white dark:bg-gray-800">
+            <table class="w-full text-left">
+              <thead class="bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-300 text-xs uppercase sticky top-0 z-10">
+                <tr>
+                  <th class="px-6 py-3">Serial No</th>
+                  <th class="px-6 py-3">Model</th>
+                  <th class="px-6 py-3">Expiry</th>
+                  <th class="px-6 py-3">Updated</th>
+                  <th class="px-6 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody" class="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                <tr>
+                  <td colspan="5" class="p-10 text-center text-gray-400 dark:text-gray-500">Select a folder to view data</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-upload" class="hidden h-full flex justify-center items-start pt-5 overflow-y-auto">
+        <div class="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg w-full max-w-4xl flex gap-6 relative transition-colors duration-200">
+          <button id="btnReviewBatch" onclick="openBatchReview()" class="hidden absolute top-8 right-8 bg-purple-600 text-white px-4 py-2 rounded shadow-lg hover:bg-purple-700 z-10">
+            <i class="fas fa-list-check mr-2"></i> Review Batch Results
+          </button>
+
+          <div class="flex-1">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="text-xl font-bold text-gray-800 dark:text-white">New Entry</h3>
+              <button onclick="resetUpload()" class="text-xs text-blue-500 hover:underline dark:text-blue-400">Clear Form</button>
+            </div>
+            <div class="flex mb-4">
+              <button onclick="setUploadType(false)" id="type-rental" class="flex-1 py-2 rounded-l-md text-sm font-bold bg-blue-600 text-white transition">📋 Asset</button>
+              <button onclick="setUploadType(true)" id="type-service" class="flex-1 py-2 rounded-r-md text-sm font-bold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition">🔧 Client</button>
+            </div>
+            <div id="dropZone" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition mb-4 relative" onclick="document.getElementById('fileInput').click()">
+              <i class="fas fa-file-pdf text-3xl text-gray-400 mb-2"></i>
+              <p class="text-sm text-gray-600 dark:text-gray-300" id="fileNameDisplay">Click or <b>Drag & Drop</b> PDF(s) here</p>
+              <p class="text-xs text-gray-400 mt-1">Supports Batch Upload</p>
+              <input type="file" id="fileInput" class="hidden" accept="application/pdf" multiple onchange="handleFileSelect()" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-4">
+              <div class="col-span-2">
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400">Serial No</label>
+                <input id="upSerial" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white" oninput="updatePreview()" />
+              </div>
+              <div class="col-span-2">
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400">Model</label>
+                <input id="upModel" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white" oninput="updatePreview()" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400">Cal Date</label>
+                <input id="upCal" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white" placeholder="YYYY-MM-DD" oninput="updatePreview()" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400">Exp Date</label>
+                <input id="upExp" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white" placeholder="YYYY-MM-DD" oninput="updatePreview()" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400">Cert No</label>
+                <input id="upCert" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white" oninput="updatePreview()" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400">Lot No</label>
+                <input id="upLot" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white" oninput="updatePreview()" />
+              </div>
+            </div>
+            <input type="hidden" id="upCollection" />
+            <button onclick="saveManual()" id="btnSave" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 shadow transition">Save Manual Entry</button>
+          </div>
+          <div class="w-80 bg-gray-50 dark:bg-gray-700 p-4 rounded-lg border border-gray-200 dark:border-gray-600 flex flex-col gap-4">
+            <h4 class="font-bold text-gray-600 dark:text-gray-300 text-sm">Preview</h4>
+            <div id="pdfPreviewFrame" class="h-40 bg-gray-200 dark:bg-gray-600 rounded flex items-center justify-center text-gray-400 dark:text-gray-300 text-xs overflow-hidden">No PDF Selected</div>
+            <div>
+              <label class="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 block">NFC Text (Copy this)</label>
+              <div id="nfcPreview" class="nfc-box break-all select-all cursor-pointer" onclick="copyNfc()" title="Click to Copy">(Fill details to generate)</div>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 block">QR Link</label>
+              <div id="qrLinkPreview" class="text-xs text-blue-600 dark:text-blue-400 break-all bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-600">...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="detailModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg p-6 relative transition-colors duration-200">
+          <button onclick="closeModal('detailModal')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <i class="fas fa-times text-xl"></i>
+          </button>
+          <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-4">Entry Details</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs font-bold text-gray-400">SERIAL NO</label>
+              <input id="detSerial" class="w-full border dark:border-gray-600 p-2 rounded bg-gray-100 dark:bg-gray-600 dark:text-white" readonly />
+            </div>
+            <div>
+              <label class="text-xs font-bold text-gray-400">MODEL</label>
+              <input id="detModel" class="w-full border dark:border-gray-600 p-2 rounded dark:bg-gray-700 dark:text-white" />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-bold text-gray-400">CAL DATE</label>
+                <input id="detCal" class="w-full border dark:border-gray-600 p-2 rounded dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-400">EXP DATE</label>
+                <input id="detExp" class="w-full border dark:border-gray-600 p-2 rounded text-red-600 dark:text-red-400 dark:bg-gray-700" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-400">CERT NO</label>
+                <input id="detCert" class="w-full border dark:border-gray-600 p-2 rounded dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-400">LOT NO</label>
+                <input id="detLot" class="w-full border dark:border-gray-600 p-2 rounded dark:bg-gray-700 dark:text-white" />
+              </div>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-gray-400">LAST UPDATED</label>
+              <div id="detUpdated" class="text-sm text-gray-600 dark:text-gray-300">-</div>
+            </div>
+          </div>
+          <div class="flex gap-2 mt-4">
+            <a id="btnViewPdf" href="#" target="_blank" onclick="return validateLink(this)" class="flex-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 py-2 rounded text-center font-bold hover:bg-blue-200 dark:hover:bg-blue-800"><i class="fas fa-file-pdf mr-2"></i> PDF</a>
+            <a id="btnViewQr" href="#" target="_blank" onclick="return validateLink(this)" class="flex-1 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 py-2 rounded text-center font-bold hover:bg-gray-200 dark:hover:bg-gray-600"><i class="fas fa-qrcode mr-2"></i> QR</a>
+          </div>
+          <div class="flex gap-2 mt-4">
+            <button onclick="updateEntry()" class="flex-1 bg-green-600 text-white py-2 rounded font-bold hover:bg-green-700">Save Changes</button>
+          </div>
+          <div class="mt-4 pt-4 border-t dark:border-gray-700">
+            <label class="text-xs font-bold text-gray-400 block mb-1">NFC TEXT</label>
+            <div id="detNfc" class="nfc-box select-all cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition" onclick="copyText('detNfc')"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="batchReviewModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl p-6 h-3/4 flex flex-col relative transition-colors duration-200">
+          <button onclick="closeModal('batchReviewModal')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <i class="fas fa-times text-xl"></i>
+          </button>
+          <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-4">Batch Results Review</h3>
+          <div class="flex-1 overflow-auto border dark:border-gray-600 rounded">
+            <table class="w-full text-left text-gray-800 dark:text-gray-200">
+              <thead class="bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-300 text-xs uppercase sticky top-0">
+                <tr>
+                  <th class="px-4 py-2">Serial</th>
+                  <th class="px-4 py-2">Model</th>
+                  <th class="px-4 py-2">Cal</th>
+                  <th class="px-4 py-2">Exp</th>
+                  <th class="px-4 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody id="batchReviewBody" class="divide-y divide-gray-100 dark:divide-gray-600 text-sm"></tbody>
+            </table>
+          </div>
+          <div class="mt-4 text-right">
+            <button onclick="closeModal('batchReviewModal')" class="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="loading" class="fixed inset-0 bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 hidden flex items-center justify-center z-50 transition-colors duration-200">
+        <div class="text-center">
+          <i class="fas fa-circle-notch fa-spin text-5xl text-blue-600 mb-4"></i>
+          <h3 class="text-xl font-bold text-gray-800 dark:text-white">Processing...</h3>
+          <p id="loadingText" class="text-gray-500 dark:text-gray-400 mt-2">Please wait</p>
+        </div>
+      </div>
+    </main>
+
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>

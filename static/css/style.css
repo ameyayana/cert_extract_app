@@ -1,0 +1,45 @@
+.nfc-box {
+  font-family: monospace;
+  background: #f3f4f6;
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px dashed #ccc;
+  font-size: 0.85rem;
+}
+
+/* Dark mode override for NFC box */
+.dark .nfc-box {
+  background: #374151;
+  border-color: #4b5563;
+  color: #e5e7eb;
+}
+
+.modal-enter {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.modal-enter-active {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 200ms, transform 200ms;
+}
+
+/* Custom scrollbar for dark mode nicer look */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #1f2937; 
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #4b5563; 
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #6b7280; 
+}
